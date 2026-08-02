@@ -118,12 +118,24 @@ async function iniciarAppLogado(token, nomeMotoboy) {
 
 // ---------- Entregas ----------
 
+let abaEntregasMotoboyAtual = 'ativas';
+
+function mudarAbaEntregasMotoboy(aba) {
+    abaEntregasMotoboyAtual = aba;
+    const ativo = 'flex-1 py-2 rounded-lg text-sm font-semibold bg-blue-600 text-white';
+    const inativo = 'flex-1 py-2 rounded-lg text-sm font-semibold bg-white border border-slate-200 text-slate-600';
+    document.getElementById('aba-motoboy-ativas').className = aba === 'ativas' ? ativo : inativo;
+    document.getElementById('aba-motoboy-historico').className = aba === 'historico' ? ativo : inativo;
+    carregarEntregas();
+}
+
 async function carregarEntregas() {
     if (!tokenAtual) return;
     const lista = document.getElementById('lista-entregas');
 
     try {
-        const resposta = await fetch(`${API_BASE}/motoboy_minhas_entregas.php?token=${encodeURIComponent(tokenAtual)}`);
+        const historico = abaEntregasMotoboyAtual === 'historico' ? '&historico=1' : '';
+        const resposta = await fetch(`${API_BASE}/motoboy_minhas_entregas.php?token=${encodeURIComponent(tokenAtual)}${historico}`);
         const resultado = await resposta.json();
 
         if (resultado.status !== 'sucesso') {
@@ -137,10 +149,33 @@ async function carregarEntregas() {
     }
 }
 
+function montarResumoItens(itens) {
+    if (!itens || itens.length === 0) return '';
+    return itens.map(i => `${parseFloat(i.quantidade)}x ${escapeHtml(i.nome)}`).join(', ');
+}
+
 function renderizarEntregas(entregas) {
     const lista = document.getElementById('lista-entregas');
     if (entregas.length === 0) {
-        lista.innerHTML = '<p class="text-center text-slate-400 py-10 text-sm">Nenhuma entrega no momento. 🎉</p>';
+        lista.innerHTML = abaEntregasMotoboyAtual === 'historico'
+            ? '<p class="text-center text-slate-400 py-10 text-sm">Nenhuma entrega concluída ainda.</p>'
+            : '<p class="text-center text-slate-400 py-10 text-sm">Nenhuma entrega no momento. 🎉</p>';
+        return;
+    }
+
+    if (abaEntregasMotoboyAtual === 'historico') {
+        lista.innerHTML = entregas.map(e => `
+            <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-4">
+                <div class="flex items-start justify-between gap-2">
+                    <p class="font-bold text-slate-800">${escapeHtml(e.cliente_nome || 'Cliente')}</p>
+                    <span class="bg-green-50 text-green-700 px-2 py-0.5 rounded-full text-xs font-bold flex-shrink-0">✓ Entregue</span>
+                </div>
+                <p class="text-xs text-slate-400 mb-1">${e.data_venda ? new Date(e.data_venda.replace(' ', 'T')).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : ''}</p>
+                <p class="text-sm text-slate-600 mb-1">📍 ${escapeHtml(e.endereco_entrega || 'Endereço não informado')}</p>
+                <p class="text-xs text-slate-500 mb-2">${montarResumoItens(e.itens)}</p>
+                <span class="font-bold text-slate-800">R$ ${parseFloat(e.valor_total).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+            </div>
+        `).join('');
         return;
     }
 
@@ -148,7 +183,8 @@ function renderizarEntregas(entregas) {
         <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-4">
             <p class="font-bold text-slate-800">${escapeHtml(e.cliente_nome || 'Cliente')}</p>
             <p class="text-xs text-slate-400 mb-1">${escapeHtml(e.cliente_telefone || '')}</p>
-            <p class="text-sm text-slate-600 mb-3">📍 ${escapeHtml(e.endereco_entrega || 'Endereço não informado')}</p>
+            <p class="text-sm text-slate-600 mb-1">📍 ${escapeHtml(e.endereco_entrega || 'Endereço não informado')}</p>
+            <p class="text-xs text-slate-500 mb-3">🛍️ ${montarResumoItens(e.itens) || 'Itens não informados'}</p>
             <div class="flex items-center justify-between gap-2">
                 <span class="font-bold text-slate-800">R$ ${parseFloat(e.valor_total).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
                 <div class="flex gap-2">
