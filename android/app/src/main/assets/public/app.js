@@ -472,13 +472,73 @@ function renderizarGanhos(dados) {
             <div class="flex items-end gap-2">${barrasHtml}</div>
         </div>
 
-        <div class="bg-white rounded-xl shadow-sm border border-slate-200 divide-y divide-slate-100">
+        <div class="bg-white rounded-xl shadow-sm border border-slate-200 divide-y divide-slate-100 mb-4">
             <div class="p-4 flex items-center justify-between">
                 <span class="text-sm text-slate-600">Ticket médio por entrega</span>
                 <span class="font-bold text-slate-800">R$ ${fmtMoeda(dados.ticket_medio)}</span>
             </div>
         </div>
+
+        <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-4">
+            <p class="font-bold text-slate-700 mb-1">Resumo de período</p>
+            <p class="text-xs text-slate-400 mb-3">Veja seu total dos últimos 30 dias, ou escolha um dia específico pra conferir.</p>
+            <div id="bloco-ganhos-30dias" class="bg-slate-50 rounded-lg p-3 mb-3">
+                <p class="text-xs text-slate-400">Carregando...</p>
+            </div>
+            <label class="text-xs text-slate-500 font-medium">Ver um dia específico:</label>
+            <div class="flex items-center gap-2 mt-1.5">
+                <input type="date" id="ganhos-data-especifica-input" class="flex-1 border border-slate-200 rounded-lg px-2.5 py-2 text-sm">
+                <button onclick="consultarGanhosDataEspecifica()" class="bg-blue-700 hover:bg-blue-800 text-white px-4 py-2 rounded-lg text-sm font-bold">Ver</button>
+            </div>
+            <div id="ganhos-data-especifica-resultado" class="mt-3"></div>
+        </div>
     `;
+
+    carregarGanhosDetalhe();
+}
+
+// Busca o resumo de "últimos 30 dias" separado (endpoint próprio, mesmo
+// cálculo do painel da loja) - roda depois do renderizarGanhos() acima
+// pra não atrasar a tela principal esperando essa consulta extra.
+async function carregarGanhosDetalhe(data) {
+    if (!tokenAtual) return;
+    try {
+        const qsData = data ? `&data=${encodeURIComponent(data)}` : '';
+        const resposta = await fetch(`${API_BASE}/motoboy_detalhe_ganhos.php?token=${encodeURIComponent(tokenAtual)}${qsData}`);
+        const resultado = await resposta.json();
+        if (resultado.status !== 'sucesso') return;
+
+        const bloco30 = document.getElementById('bloco-ganhos-30dias');
+        if (bloco30) {
+            bloco30.innerHTML = `
+                <p class="text-xs text-slate-500">Últimos 30 dias</p>
+                <p class="text-lg font-bold text-slate-800">${resultado.ultimos_30_dias.qtd_entregas} entrega(s) · <span class="text-green-700">R$ ${fmtMoeda(resultado.ultimos_30_dias.ganho)}</span></p>
+            `;
+        }
+
+        const elResultadoData = document.getElementById('ganhos-data-especifica-resultado');
+        if (elResultadoData) {
+            if (resultado.data_especifica) {
+                const d = resultado.data_especifica;
+                const dataBr = new Date(d.data + 'T00:00:00').toLocaleDateString('pt-BR');
+                elResultadoData.innerHTML = `<div class="bg-blue-50 border border-blue-100 rounded-lg px-3 py-2.5">
+                    <p class="text-xs text-blue-700 font-medium">${dataBr}</p>
+                    <p class="text-sm font-bold text-slate-800">${d.qtd_entregas} entrega(s) · <span class="text-green-700">R$ ${fmtMoeda(d.ganho)}</span></p>
+                    ${d.qtd_nao_atendida > 0 ? `<p class="text-xs text-orange-600 mt-0.5">🚫 ${d.qtd_nao_atendida} não atendida(s) nesse dia</p>` : ''}
+                </div>`;
+            } else {
+                elResultadoData.innerHTML = '';
+            }
+        }
+    } catch (e) {
+        // Informativo - se falhar, só não mostra o resumo de período dessa vez.
+    }
+}
+
+function consultarGanhosDataEspecifica() {
+    const data = document.getElementById('ganhos-data-especifica-input')?.value;
+    if (!data) { alert('Escolha uma data primeiro.'); return; }
+    carregarGanhosDetalhe(data);
 }
 
 // ---------- Aba Perfil ----------
