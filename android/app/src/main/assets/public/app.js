@@ -131,12 +131,41 @@ async function iniciarAppLogado(token, nomeMotoboy) {
     await carregarEntregas();
 
     // Atualiza a lista de entregas sozinha de tempos em tempos, pra
-    // aparecer uma entrega nova sem precisar fechar e abrir o app.
+    // aparecer uma entrega nova sem precisar fechar e abrir o app. 15s
+    // (era 30s) - entrega nova pra atender é uma coisa sensível a tempo,
+    // vale a pena atualizar mais rápido.
     if (intervalAtualizarEntregas) clearInterval(intervalAtualizarEntregas);
     intervalAtualizarEntregas = setInterval(() => {
         carregarEntregas();
         if (abaPrincipalAtual === 'mapa') renderizarMapa();
-    }, 30000);
+    }, 15000);
+
+    // O problema principal não é o intervalo em si - é que o Android
+    // pausa o JavaScript quando o app vai pra segundo plano (o
+    // entregador troca de tela, olha o WhatsApp, etc.), então o
+    // setInterval acima simplesmente para de rodar. Sem isso, ele só via
+    // a entrega nova depois de tocar "Atualizar" na mão. Agora, assim
+    // que o app volta pra frente (resume), atualiza na hora - sem
+    // esperar o próximo tick do intervalo.
+    configurarAtualizacaoAoVoltarParaFrente();
+}
+
+let atualizacaoAoVoltarConfigurada = false;
+function configurarAtualizacaoAoVoltarParaFrente() {
+    if (atualizacaoAoVoltarConfigurada) return;
+    atualizacaoAoVoltarConfigurada = true;
+
+    const { App: AppPlugin } = pluginsCapacitor();
+    if (AppPlugin && AppPlugin.addListener) {
+        AppPlugin.addListener('resume', () => {
+            if (tokenAtual) carregarEntregas();
+        });
+    }
+    // Fallback pra quando testado num navegador comum (sem o plugin
+    // nativo) - mesma ideia, via evento padrão da aba/página.
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible' && tokenAtual) carregarEntregas();
+    });
 }
 
 // ---------- Formatação de pagamento (troco, crédito/débito, pago/a receber) ----------
@@ -246,7 +275,7 @@ function renderizarEntregas(entregas) {
             return `
             <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-4">
                 <div class="flex items-start justify-between gap-2">
-                    <p class="font-bold text-slate-800">${escapeHtml(e.cliente_nome || 'Cliente')}</p>
+                    <p class="font-bold text-slate-800">${escapeHtml(e.cliente_nome || 'Cliente')}${e.numero_pedido ? ` <span class="text-xs text-slate-400 font-normal">#${escapeHtml(e.numero_pedido)}</span>` : ''}</p>
                     ${tagStatus}
                 </div>
                 <p class="text-xs text-slate-400 mb-1">${e.data_venda ? new Date(e.data_venda.replace(' ', 'T')).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : ''}</p>
@@ -285,7 +314,7 @@ function renderizarEntregas(entregas) {
         return `
         <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-4">
             <div class="flex items-start justify-between gap-2 mb-1.5">
-                <p class="font-bold text-slate-800">${escapeHtml(e.cliente_nome || 'Cliente')}</p>
+                <p class="font-bold text-slate-800">${escapeHtml(e.cliente_nome || 'Cliente')}${e.numero_pedido ? ` <span class="text-xs text-slate-400 font-normal">#${escapeHtml(e.numero_pedido)}</span>` : ''}</p>
                 ${tagTopo}
             </div>
             <p class="text-xs text-slate-400 mb-1">${escapeHtml(e.cliente_telefone || '')}</p>
