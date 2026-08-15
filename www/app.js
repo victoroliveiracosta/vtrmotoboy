@@ -253,7 +253,10 @@ function renderizarEntregas(entregas) {
                 <p class="text-sm text-slate-600 mb-1">📍 ${escapeHtml(e.endereco_entrega || 'Endereço não informado')}</p>
                 <p class="text-xs text-slate-500 mb-2">${montarResumoItens(e.itens)}</p>
                 ${naoAtendido && e.motivo_cancelamento ? `<p class="text-xs text-orange-700 bg-orange-50 border border-orange-100 rounded-lg px-2 py-1.5 mb-2">${escapeHtml(e.motivo_cancelamento)}</p>` : ''}
-                <span class="font-bold text-slate-800">R$ ${fmtMoeda(e.valor_total)}</span>
+                <div class="flex items-center justify-between gap-2">
+                    <span class="text-xs text-slate-400">Valor do pedido: R$ ${fmtMoeda(e.valor_total)}</span>
+                    ${e.ganho_entrega != null ? `<span class="font-bold text-green-700">💰 R$ ${fmtMoeda(e.ganho_entrega)}</span>` : ''}
+                </div>
             </div>`;
         }).join('');
         return;
@@ -291,7 +294,8 @@ function renderizarEntregas(entregas) {
             <div class="mb-3">${montarInfoPagamento(e)}</div>
             ${chegouLocal ? '<p class="text-[11px] text-slate-400 mb-2">Se ninguém atender, registre como "Não atendido" - o horário e sua localização ficam salvos.</p>' : ''}
             <div class="flex items-center justify-between gap-2 mb-3">
-                <span class="font-bold text-slate-800">R$ ${fmtMoeda(e.valor_total)}</span>
+                <span class="text-xs text-slate-400">Valor do pedido: R$ ${fmtMoeda(e.valor_total)}</span>
+                ${e.ganho_entrega != null ? `<span class="font-bold text-green-700">💰 R$ ${fmtMoeda(e.ganho_entrega)}</span>` : ''}
             </div>
             <div class="grid grid-cols-2 gap-2">${acoesHtml}</div>
         </div>`;
