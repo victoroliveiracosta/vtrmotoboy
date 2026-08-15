@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">VTR Motoboy</string>
-    <string name="title_activity_main">VTR Motoboy</string>
+    <string name="app_name">VTR Entregador</string>
+    <string name="title_activity_main">VTR Entregador</string>
     <string name="package_name">com.vtrpdv.motoboy</string>
     <string name="custom_url_scheme">com.vtrpdv.motoboy</string>
 </resources>

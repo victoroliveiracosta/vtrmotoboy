@@ -2,12 +2,12 @@ import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
   appId: 'com.vtrpdv.motoboy',
-  appName: 'VTR Motoboy',
+  appName: 'VTR Entregador',
   webDir: 'www',
   plugins: {
     SplashScreen: {
       launchShowDuration: 1200,
-      backgroundColor: '#2563eb',
+      backgroundColor: '#0033E0',
       androidSplashResourceName: 'splash',
       showSpinner: false,
     },

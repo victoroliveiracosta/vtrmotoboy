@@ -1,4 +1,4 @@
-# VTR Motoboy
+# VTR Entregador
 
 App do entregador do VTR PDV. Manda a localização em tempo real pra loja
 acompanhar a entrega, mesmo com a tela apagada ou o app em segundo plano.
@@ -23,9 +23,9 @@ acompanhar a entrega, mesmo com a tela apagada ou o app em segundo plano.
 2. Assim que subir, o GitHub já começa a compilar sozinho (o arquivo
    `.github/workflows/build-android.yml` cuida disso).
 3. Vai na aba **Actions** do repositório, clica na execução mais
-   recente (o nome é "Build APK do VTR Motoboy"), espera terminar
+   recente (o nome é "Build APK do VTR Entregador"), espera terminar
    (leva uns 3-5 minutos).
-4. Desce até **Artifacts**, baixa o `vtr-motoboy-apk.zip`, descompacta -
+4. Desce até **Artifacts**, baixa o `vtr-entregador-apk.zip`, descompacta -
    dentro tem o `app-debug.apk`.
 5. Manda esse `.apk` pro celular do motoboy (por WhatsApp, Google Drive,
    o que for mais fácil) e instala. O Android vai avisar "fonte
@@ -56,10 +56,11 @@ precisaria de uma "assinatura" própria, um passo a mais que não é
 necessário se a ideia é só instalar manualmente, sem passar pela loja
 de aplicativos).
 
-## Personalizando o ícone do app
+## Ícone e tela de splash
 
-O app está usando o ícone padrão do Capacitor por enquanto. Pra trocar
-pela logo do VTR PDV, é só substituir os arquivos dentro de
-`android/app/src/main/res/mipmap-*/` (várias resoluções do mesmo
-ícone) - ou usar a ferramenta `@capacitor/assets` pra gerar tudo
-automático a partir de uma imagem só.
+Já estão configurados com a logo "VTR PDV Entregador" (arquivos dentro
+de `android/app/src/main/res/mipmap-*/` pro ícone e
+`android/app/src/main/res/drawable*/splash.png` pra tela de abertura).
+Pra trocar de novo no futuro, é só gerar os tamanhos novos a partir de
+uma imagem quadrada (1024×1024 funciona bem) e substituir esses
+arquivos, ou usar a ferramenta `@capacitor/assets` pra automatizar.

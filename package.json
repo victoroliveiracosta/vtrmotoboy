@@ -1,7 +1,7 @@
 {
-  "name": "vtr-motoboy",
+  "name": "vtr-entregador",
   "version": "1.0.0",
-  "description": "App do entregador do VTR PDV - rastreio GPS em segundo plano",
+  "description": "VTR Entregador - app do entregador do VTR PDV, rastreio GPS em segundo plano",
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"

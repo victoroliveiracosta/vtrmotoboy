@@ -3,12 +3,14 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
-<title>VTR Motoboy</title>
+<title>VTR Entregador</title>
 <script src="https://cdn.tailwindcss.com"></script>
 <style>
-    body { -webkit-tap-highlight-color: transparent; overscroll-behavior: none; }
+    body { -webkit-tap-highlight-color: transparent; overscroll-behavior: none; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
     .safe-top { padding-top: env(safe-area-inset-top); }
     .safe-bottom { padding-bottom: env(safe-area-inset-bottom); }
+    .header-gradient { background: linear-gradient(135deg, #0033E0 0%, #1D5CFF 100%); }
+    .barra-ganho { transition: height .3s ease; }
 </style>
 </head>
 <body class="bg-slate-50 min-h-screen">
@@ -16,42 +18,120 @@
     <!-- TELA: LOGIN (colar o código de rastreio) -->
     <div id="tela-login" class="hidden min-h-screen flex flex-col justify-center p-6 safe-top safe-bottom">
         <div class="text-center mb-8">
-            <div class="w-16 h-16 bg-blue-600 rounded-2xl flex items-center justify-center mx-auto mb-4 text-3xl">🏍️</div>
-            <h1 class="text-2xl font-bold text-slate-800">VTR Motoboy</h1>
+            <img src="icon-app.png" alt="VTR Entregador" class="w-20 h-20 rounded-2xl mx-auto mb-4 shadow-lg" onerror="this.style.display='none'; document.getElementById('icone-fallback-login').style.display='flex';">
+            <div id="icone-fallback-login" class="hidden w-20 h-20 rounded-2xl mx-auto mb-4 shadow-lg items-center justify-center text-4xl header-gradient">🏍️</div>
+            <h1 class="text-2xl font-bold text-slate-800">VTR Entregador</h1>
             <p class="text-sm text-slate-500 mt-1">Cole o código que a loja te enviou pra começar.</p>
         </div>
         <input id="input-token-login" type="text" placeholder="Cole seu código de acesso aqui" class="w-full border border-slate-300 rounded-xl p-3.5 text-sm mb-3" autocomplete="off" autocapitalize="off">
         <p id="erro-login" class="hidden text-sm text-red-600 mb-3"></p>
-        <button id="botao-entrar" onclick="fazerLogin()" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3.5 rounded-xl">Entrar</button>
+        <button id="botao-entrar" onclick="fazerLogin()" class="w-full bg-blue-700 hover:bg-blue-800 text-white font-bold py-3.5 rounded-xl">Entrar</button>
         <p class="text-xs text-slate-400 text-center mt-4">Esse código foi te enviado pela loja - se não tiver, peça pro gerente reenviar o link.</p>
     </div>
 
-    <!-- TELA: PRINCIPAL (entregas + rastreio) -->
-    <div id="tela-principal" class="hidden min-h-screen flex flex-col safe-top safe-bottom">
-        <div class="bg-blue-600 text-white p-4 flex items-center justify-between">
+    <!-- TELA: PRINCIPAL -->
+    <div id="tela-principal" class="hidden min-h-screen flex flex-col safe-top">
+        <div class="header-gradient text-white p-4 pb-5 flex items-start justify-between flex-shrink-0">
             <div>
-                <p class="text-xs text-blue-200">Olá,</p>
-                <p id="nome-motoboy-header" class="font-bold text-lg leading-tight">Motoboy</p>
+                <p class="text-xs text-blue-100">Olá,</p>
+                <p id="nome-motoboy-header" class="font-bold text-lg leading-tight">Entregador</p>
             </div>
             <div class="flex items-center gap-2">
-                <span id="indicador-gps" class="flex items-center gap-1.5 bg-blue-700 px-2.5 py-1 rounded-full text-xs font-semibold">
-                    <span id="ponto-gps" class="w-2 h-2 rounded-full bg-slate-400"></span>
+                <span id="indicador-gps" class="flex items-center gap-1.5 bg-white/15 px-2.5 py-1 rounded-full text-xs font-semibold">
+                    <span id="ponto-gps" class="w-2 h-2 rounded-full bg-slate-300"></span>
                     <span id="texto-gps">GPS</span>
                 </span>
-                <button onclick="sair()" class="text-blue-200 text-xs underline">Sair</button>
+                <button onclick="sair()" class="text-blue-100 text-xs underline flex-shrink-0">Sair</button>
             </div>
         </div>
 
-        <div id="aviso-permissao" class="hidden bg-amber-50 border-b border-amber-200 p-3 text-xs text-amber-800">
+        <div id="aviso-permissao" class="hidden bg-amber-50 border-b border-amber-200 p-3 text-xs text-amber-800 flex-shrink-0">
             ⚠️ Precisamos da sua localização em segundo plano pra loja acompanhar a entrega. Toca aqui pra liberar.
         </div>
 
-        <div class="flex-1 overflow-y-auto p-4">
+        <!-- ===== ABA: ENTREGAS ===== -->
+        <div id="secao-entregas" class="flex-1 overflow-y-auto p-4 pb-24">
             <div class="flex items-center justify-between mb-3">
-                <h2 class="font-bold text-slate-700">Minhas entregas</h2>
-                <button onclick="carregarEntregas()" class="text-xs text-blue-600 font-semibold">🔄 Atualizar</button>
+                <h2 class="font-bold text-slate-700 text-lg">Minhas entregas</h2>
+                <button onclick="carregarEntregas()" class="text-xs text-blue-700 font-semibold">🔄 Atualizar</button>
+            </div>
+            <div class="flex gap-2 mb-3">
+                <button id="aba-motoboy-ativas" onclick="mudarAbaEntregasMotoboy('ativas')" class="flex-1 py-2 rounded-lg text-sm font-semibold bg-blue-700 text-white">Ativas</button>
+                <button id="aba-motoboy-historico" onclick="mudarAbaEntregasMotoboy('historico')" class="flex-1 py-2 rounded-lg text-sm font-semibold bg-white border border-slate-200 text-slate-600">Histórico</button>
             </div>
             <div id="lista-entregas" class="space-y-3"></div>
+
+            <div class="bg-blue-50 border border-blue-100 rounded-xl p-3.5 mt-4 flex items-start gap-2.5">
+                <span class="text-blue-500 flex-shrink-0">ℹ️</span>
+                <div class="text-xs text-blue-800">
+                    <p class="font-bold mb-0.5">Dica do dia</p>
+                    <p>Mantenha seu GPS ativo pra receber mais entregas na sua região!</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== ABA: MAPA ===== -->
+        <div id="secao-mapa" class="hidden flex-1 overflow-y-auto p-4 pb-24">
+            <h2 class="font-bold text-slate-700 text-lg mb-1">Mapa</h2>
+            <p class="text-xs text-slate-400 mb-3">Rota das suas entregas ativas no momento.</p>
+            <div id="lista-mapa" class="space-y-3"></div>
+        </div>
+
+        <!-- ===== ABA: GANHOS ===== -->
+        <div id="secao-ganhos" class="hidden flex-1 overflow-y-auto p-4 pb-24">
+            <div class="flex items-center justify-between mb-3">
+                <h2 class="font-bold text-slate-700 text-lg">Meus ganhos</h2>
+                <button onclick="carregarGanhos()" class="text-xs text-blue-700 font-semibold">🔄 Atualizar</button>
+            </div>
+            <div id="bloco-ganhos-conteudo">
+                <p class="text-center text-slate-400 py-10 text-sm">Carregando...</p>
+            </div>
+        </div>
+
+        <!-- ===== ABA: PERFIL ===== -->
+        <div id="secao-perfil" class="hidden flex-1 overflow-y-auto p-4 pb-24">
+            <h2 class="font-bold text-slate-700 text-lg mb-3">Perfil</h2>
+            <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-4 flex items-center gap-3 mb-4">
+                <div class="w-14 h-14 rounded-full bg-blue-100 flex items-center justify-center text-2xl flex-shrink-0">🏍️</div>
+                <div class="min-w-0">
+                    <p id="perfil-nome" class="font-bold text-slate-800 truncate">-</p>
+                    <p id="perfil-telefone" class="text-sm text-slate-500">-</p>
+                    <p id="perfil-id" class="text-xs text-slate-400">-</p>
+                </div>
+            </div>
+            <div class="bg-white rounded-xl shadow-sm border border-slate-200 divide-y divide-slate-100 mb-4">
+                <div class="p-4">
+                    <p class="font-semibold text-slate-700 text-sm">Central de ajuda</p>
+                    <p class="text-xs text-slate-400">Fale com a loja em caso de dúvida sobre uma entrega.</p>
+                </div>
+                <div class="p-4">
+                    <p class="font-semibold text-slate-700 text-sm">Sobre o aplicativo</p>
+                    <p class="text-xs text-slate-400">VTR Entregador</p>
+                </div>
+            </div>
+            <button onclick="sair()" class="w-full bg-red-50 hover:bg-red-100 text-red-600 font-bold py-3 rounded-xl border border-red-100">Sair da conta</button>
+        </div>
+
+        <!-- ===== NAV INFERIOR ===== -->
+        <div class="flex-shrink-0 bg-white border-t border-slate-200 safe-bottom">
+            <div class="flex items-stretch">
+                <button id="nav-entregas" onclick="mudarAbaPrincipal('entregas')" class="flex-1 flex flex-col items-center justify-center gap-0.5 py-2.5 text-blue-700">
+                    <span class="text-xl leading-none">📦</span>
+                    <span class="text-[11px] font-semibold">Entregas</span>
+                </button>
+                <button id="nav-mapa" onclick="mudarAbaPrincipal('mapa')" class="flex-1 flex flex-col items-center justify-center gap-0.5 py-2.5 text-slate-400">
+                    <span class="text-xl leading-none">🗺️</span>
+                    <span class="text-[11px] font-semibold">Mapa</span>
+                </button>
+                <button id="nav-ganhos" onclick="mudarAbaPrincipal('ganhos')" class="flex-1 flex flex-col items-center justify-center gap-0.5 py-2.5 text-slate-400">
+                    <span class="text-xl leading-none">💰</span>
+                    <span class="text-[11px] font-semibold">Ganhos</span>
+                </button>
+                <button id="nav-perfil" onclick="mudarAbaPrincipal('perfil')" class="flex-1 flex flex-col items-center justify-center gap-0.5 py-2.5 text-slate-400">
+                    <span class="text-xl leading-none">👤</span>
+                    <span class="text-[11px] font-semibold">Perfil</span>
+                </button>
+            </div>
         </div>
     </div>
 
