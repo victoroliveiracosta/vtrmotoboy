@@ -254,7 +254,15 @@ async function carregarEntregas() {
 
 function montarResumoItens(itens) {
     if (!itens || itens.length === 0) return '';
-    return itens.map(i => `${parseFloat(i.quantidade)}x ${escapeHtml(i.nome)}`).join(', ');
+    return itens.map(i => {
+        // Se tiver adicionais/opcionais (bebida, sabor, etc), mostra junto
+        // do nome do produto - assim o entregador vê "Combo X-tudo (Guaraná,
+        // Batata)" em vez de só "Combo X-tudo" e não saber o que levar.
+        const adicionaisTexto = (i.opcoes && i.opcoes.length > 0)
+            ? ` (${i.opcoes.map(o => escapeHtml(o.item_nome)).join(', ')})`
+            : '';
+        return `${parseFloat(i.quantidade)}x ${escapeHtml(i.nome)}${adicionaisTexto}`;
+    }).join(', ');
 }
 
 function renderizarEntregas(entregas) {
