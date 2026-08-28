@@ -286,7 +286,7 @@ function renderizarEntregas(entregas) {
                     <p class="font-bold text-slate-800">${escapeHtml(e.cliente_nome || 'Cliente')}${e.numero_pedido ? ` <span class="text-xs text-slate-400 font-normal">#${escapeHtml(e.numero_pedido)}</span>` : ''}</p>
                     ${tagStatus}
                 </div>
-                <p class="text-xs text-slate-400 mb-1">${e.data_venda ? new Date(e.data_venda.replace(' ', 'T')).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : ''}</p>
+                <p class="text-xs text-slate-400 mb-1">${e.data_venda ? new Date(e.data_venda.replace(' ', 'T')).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : ''}${e.cliente_telefone ? ` · <a href="tel:${e.cliente_telefone.replace(/\D/g, '')}" class="text-blue-600 font-semibold" onclick="event.stopPropagation()">📞 ${escapeHtml(e.cliente_telefone)}</a>` : ''}</p>
                 <p class="text-sm text-slate-600 mb-1">📍 ${escapeHtml(e.endereco_entrega || 'Endereço não informado')}</p>
                 <p class="text-xs text-slate-500 mb-2">${montarResumoItens(e.itens)}</p>
                 ${naoAtendido && e.motivo_cancelamento ? `<p class="text-xs text-orange-700 bg-orange-50 border border-orange-100 rounded-lg px-2 py-1.5 mb-2">${escapeHtml(e.motivo_cancelamento)}</p>` : ''}
@@ -325,7 +325,7 @@ function renderizarEntregas(entregas) {
                 <p class="font-bold text-slate-800">${escapeHtml(e.cliente_nome || 'Cliente')}${e.numero_pedido ? ` <span class="text-xs text-slate-400 font-normal">#${escapeHtml(e.numero_pedido)}</span>` : ''}</p>
                 ${tagTopo}
             </div>
-            <p class="text-xs text-slate-400 mb-1">${escapeHtml(e.cliente_telefone || '')}</p>
+            <p class="text-xs text-slate-400 mb-1">${e.cliente_telefone ? `<a href="tel:${e.cliente_telefone.replace(/\D/g, '')}" class="text-blue-600 font-semibold" onclick="event.stopPropagation()">📞 ${escapeHtml(e.cliente_telefone)}</a>` : ''}</p>
             <p class="text-sm text-slate-600 mb-1">📍 ${escapeHtml(e.endereco_entrega || 'Endereço não informado')}</p>
             <p class="text-xs text-slate-500 mb-2">🛍️ ${montarResumoItens(e.itens) || 'Itens não informados'}</p>
             <div class="mb-3">${montarInfoPagamento(e)}</div>
@@ -415,6 +415,7 @@ function renderizarMapa() {
     lista.innerHTML = ativas.map(e => `
         <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-4">
             <p class="font-bold text-slate-800 mb-1">${escapeHtml(e.cliente_nome || 'Cliente')}</p>
+            ${e.cliente_telefone ? `<a href="tel:${e.cliente_telefone.replace(/\D/g, '')}" class="inline-block text-sm text-blue-600 font-semibold mb-1">📞 ${escapeHtml(e.cliente_telefone)}</a>` : ''}
             <p class="text-sm text-slate-600 mb-3">📍 ${escapeHtml(e.endereco_entrega || 'Endereço não informado')}</p>
             <a href="https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(e.endereco_entrega || '')}" target="_blank" class="block w-full text-center bg-blue-700 hover:bg-blue-800 text-white font-bold py-2.5 rounded-lg text-sm">🗺️ Abrir rota no Google Maps</a>
         </div>
