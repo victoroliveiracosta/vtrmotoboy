@@ -207,20 +207,42 @@ async function iniciarAppLogado(token, nomeMotoboy) {
 }
 
 let atualizacaoAoVoltarConfigurada = false;
+// Status conhecido mais recente do GPS - existe porque, quando o app fica
+// muito tempo minimizado, o Android às vezes recarrega a tela do zero
+// pra economizar memória (comportamento do sistema, fora do nosso
+// controle). Isso fazia o indicador de GPS voltar pra "Conectando..." (ou
+// pior, parecer desligado) até chegar uma posição nova - mesmo o GPS
+// continuando de verdade ativo em segundo plano o tempo todo. Guardando
+// o último status e reaplicando ele assim que o app volta pra frente,
+// o indicador nunca mais mostra "desligado" sem motivo.
+let ultimoStatusGpsConhecido = 'conectando';
 function configurarAtualizacaoAoVoltarParaFrente() {
     if (atualizacaoAoVoltarConfigurada) return;
     atualizacaoAoVoltarConfigurada = true;
 
+    const aoVoltarParaFrente = () => {
+        if (!tokenAtual) return;
+        carregarEntregas();
+        // Reaplica o indicador de GPS na hora (não espera a próxima posição
+        // chegar) - ver comentário em ultimoStatusGpsConhecido acima.
+        atualizarIndicadorGps(ultimoStatusGpsConhecido);
+        // Reforço: tenta sincronizar qualquer ação offline pendente assim
+        // que o app volta pra frente - normalmente isso já acontece
+        // sozinho em segundo plano (ver o "tique" de GPS dentro de
+        // iniciarRastreioGps), mas se o entregador não andou nada
+        // enquanto estava com a tela apagada, pode não ter tido nenhum
+        // tique de GPS pra disparar isso - aqui é a garantia final.
+        if (navigator.onLine) sincronizarPendentesOffline();
+    };
+
     const { App: AppPlugin } = pluginsCapacitor();
     if (AppPlugin && AppPlugin.addListener) {
-        AppPlugin.addListener('resume', () => {
-            if (tokenAtual) carregarEntregas();
-        });
+        AppPlugin.addListener('resume', aoVoltarParaFrente);
     }
     // Fallback pra quando testado num navegador comum (sem o plugin
     // nativo) - mesma ideia, via evento padrão da aba/página.
     document.addEventListener('visibilitychange', () => {
-        if (document.visibilityState === 'visible' && tokenAtual) carregarEntregas();
+        if (document.visibilityState === 'visible') aoVoltarParaFrente();
     });
 }
 
@@ -849,6 +871,21 @@ async function iniciarRastreioGps() {
                 if (posicao) {
                     enviarLocalizacaoServidor(posicao.latitude, posicao.longitude);
                 }
+                // Aproveita esse "tique" pra também tentar sincronizar
+                // qualquer ação offline pendente (chegou/entregue/não
+                // atendido) - IMPORTANTE: esse callback do
+                // BackgroundGeolocation é a ÚNICA parte do app que
+                // continua rodando de verdade mesmo com o app minimizado
+                // (é o que permite o rastreio ao vivo continuar). Sem
+                // aproveitar esse gancho, a sincronização só acontecia
+                // quando o entregador REABRIA o app na tela (ver
+                // configurarAtualizacaoAoVoltarParaFrente) - se ele desse
+                // "chegou"/"entregue" sem internet e fosse pra tela
+                // inicial do celular sem abrir o app de novo, a loja só
+                // ficava sabendo horas depois, quando ele lembrasse de
+                // abrir. Agora, o próprio GPS rodando em segundo plano já
+                // resolve isso sozinho.
+                if (navigator.onLine) sincronizarPendentesOffline();
             }
         );
     } catch (e) {
@@ -879,6 +916,7 @@ async function enviarLocalizacaoServidor(latitude, longitude) {
 }
 
 function atualizarIndicadorGps(estado) {
+    ultimoStatusGpsConhecido = estado; // guarda pra poder reaplicar quando o app voltar pra frente (ver configurarAtualizacaoAoVoltarParaFrente)
     const ponto = document.getElementById('ponto-gps');
     const texto = document.getElementById('texto-gps');
     const cores = {
