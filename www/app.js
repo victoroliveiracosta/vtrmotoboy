@@ -305,6 +305,13 @@ async function carregarEntregas() {
         ultimasEntregasCarregadas = resultado.entregas || [];
         if (resultado.motoboy_id) motoboyIdAtual = resultado.motoboy_id;
         if (resultado.motoboy_telefone) motoboyTelefoneAtual = resultado.motoboy_telefone;
+        // Reaplica localmente qualquer "cheguei no local" que ainda está
+        // esperando a internet voltar pra sincronizar de verdade - sem
+        // isso, essa atualização da lista (que reflete o que o SERVIDOR
+        // ainda pensa, sem saber do "cheguei" ainda) ia sobrescrever o
+        // estado que já tínhamos mostrado na tela, fazendo o card voltar
+        // pra "A caminho" do nada.
+        reaplicarPendentesLocalmente();
         // Guarda os códigos de confirmação de cada entrega no aparelho -
         // é isso que permite confirmar a entrega mesmo sem internet depois
         // (ver marcarEntregue). Só entregas ativas têm código pra guardar
@@ -359,7 +366,15 @@ function renderizarEntregas(entregas) {
     // pro entregador, aquela entrega já está resolvida, não faz sentido
     // continuar aparecendo como pendente pra ele.
     if (abaEntregasMotoboyAtual !== 'historico') {
-        entregas = entregas.filter(e => !pendentesOfflineEmMemoria[e.id]);
+        // Só tira da lista quem tem uma ação PENDENTE FINAL (entregue/não
+        // atendido) - "chegou" continua aparecendo normalmente, só que já
+        // com o estado atualizado (ver atualizarEstadoLocalAposAcao),
+        // porque depois de "chegou" ainda falta confirmar entregue/não
+        // atendido, então não faz sentido sumir da lista ainda.
+        entregas = entregas.filter(e => {
+            const pendente = pendentesOfflineEmMemoria[e.id];
+            return !pendente || pendente.tipo === 'chegou';
+        });
     }
 
     const qtdPendentesSincronizar = Object.keys(pendentesOfflineEmMemoria).length;
@@ -443,21 +458,7 @@ function renderizarEntregas(entregas) {
 }
 
 async function marcarChegueiNoLocal(vendaId) {
-    try {
-        const resposta = await fetch(`${API_BASE}/motoboy_marcar_chegou.php`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ token: tokenAtual, venda_id: vendaId }),
-        });
-        const resultado = await resposta.json();
-        if (resultado.status === 'sucesso') {
-            carregarEntregas();
-        } else {
-            alert(resultado.mensagem || 'Não foi possível registrar sua chegada.');
-        }
-    } catch (e) {
-        alert('Erro de conexão. Tente de novo.');
-    }
+    await enviarAcaoMotoboy(vendaId, 'chegou', {});
 }
 
 // Busca o código de confirmação de uma entrega específica, primeiro na
@@ -479,7 +480,7 @@ async function marcarEntregue(vendaId) {
     // nem estaria vendo essa tela) - confirma direto, do jeito de sempre.
     if (!codigoExigido) {
         if (!confirm('Confirmar que essa entrega foi feita?')) return;
-        await enviarConfirmacaoEntrega(vendaId, null);
+        await enviarAcaoMotoboy(vendaId, 'entregue', { codigo_confirmacao: null });
         return;
     }
 
@@ -521,22 +522,38 @@ async function confirmarCodigoEntregaDigitado() {
 
     document.getElementById('modal-codigo-confirmacao').classList.add('hidden');
     vendaIdAguardandoCodigo = null;
-    await enviarConfirmacaoEntrega(vendaId, codigoDigitado);
+    await enviarAcaoMotoboy(vendaId, 'entregue', { codigo_confirmacao: codigoDigitado });
 }
 
-// Manda a confirmação pro servidor - se der certo, ótimo. Se não tiver
-// internet (ou a chamada falhar por qualquer motivo de rede), guarda numa
-// fila local em vez de travar o entregador: a entrega já some da lista
-// dele na hora (ver renderizarEntregas), e a sincronização de verdade
-// acontece sozinha assim que a internet voltar (ver
-// sincronizarPendentesOffline, chamado toda vez que carregarEntregas roda).
-async function enviarConfirmacaoEntrega(vendaId, codigoConfirmacao) {
+// Qual endpoint/corpo da chamada usar pra cada tipo de ação do motoboy -
+// usado tanto pra tentativa online quanto pra sincronização depois.
+function montarChamadaAcaoMotoboy(vendaId, tipo, dadosExtras) {
+    if (tipo === 'chegou') {
+        return { url: `${API_BASE}/motoboy_marcar_chegou.php`, body: { token: tokenAtual, venda_id: vendaId } };
+    }
+    if (tipo === 'nao_atendido') {
+        return { url: `${API_BASE}/motoboy_marcar_nao_atendido.php`, body: { token: tokenAtual, venda_id: vendaId } };
+    }
+    // 'entregue'
+    return { url: `${API_BASE}/motoboy_marcar_entregue.php`, body: { token: tokenAtual, venda_id: vendaId, codigo_confirmacao: dadosExtras.codigo_confirmacao || null } };
+}
+
+// Ponto único pras 3 ações do motoboy que precisam avisar o servidor
+// (chegou no local, entregue, não atendido) - tenta online primeiro; se
+// não tiver internet (ou a chamada falhar por qualquer motivo de rede),
+// guarda numa fila local em vez de travar o entregador: o app já reflete
+// a mudança NA HORA (ver atualizarEstadoLocalAposAcao), e a sincronização
+// de verdade com o servidor acontece sozinha assim que a internet voltar
+// (ver sincronizarPendentesOffline). O entregador NUNCA fica impedido de
+// continuar trabalhando só porque o sinal caiu.
+async function enviarAcaoMotoboy(vendaId, tipo, dadosExtras) {
+    const { url, body } = montarChamadaAcaoMotoboy(vendaId, tipo, dadosExtras);
     if (navigator.onLine) {
         try {
-            const resposta = await fetch(`${API_BASE}/motoboy_marcar_entregue.php`, {
+            const resposta = await fetch(url, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ token: tokenAtual, venda_id: vendaId, codigo_confirmacao: codigoConfirmacao }),
+                body: JSON.stringify(body),
             });
             const resultado = await resposta.json();
             if (resultado.status === 'sucesso') {
@@ -546,27 +563,49 @@ async function enviarConfirmacaoEntrega(vendaId, codigoConfirmacao) {
             // Erro de verdade do servidor (não é problema de conexão) -
             // avisa e NÃO guarda na fila offline, senão ia ficar tentando
             // sincronizar um erro que nunca vai se resolver sozinho.
-            alert(resultado.mensagem || 'Não foi possível marcar como entregue.');
+            alert(resultado.mensagem || 'Não foi possível registrar. Tente de novo.');
             return;
         } catch (e) {
             // Caiu no meio da chamada (tinha sinal, mas oscilou) - trata
-            // como offline mesmo, guarda na fila em vez de travar o
-            // entregador.
+            // como offline mesmo, guarda na fila em vez de travar o entregador.
         }
     }
-    await guardarPendenteOffline(vendaId, codigoConfirmacao);
+    await guardarPendenteOffline(vendaId, tipo, dadosExtras);
+    atualizarEstadoLocalAposAcao(vendaId, tipo);
     renderizarEntregas(ultimasEntregasCarregadas);
 }
 
-async function guardarPendenteOffline(vendaId, codigoConfirmacao) {
-    pendentesOfflineEmMemoria[vendaId] = { codigo_confirmacao: codigoConfirmacao, salvo_em: Date.now() };
+// Reflete a ação na tela IMEDIATAMENTE, mesmo sem confirmação nenhuma do
+// servidor (ele só vai saber quando a internet voltar) - "chegou" muda o
+// cartão pra mostrar os botões de Entregue/Não atendido; "entregue" e
+// "não atendido" são estados finais, então saem da lista de ativas (ver
+// filtro em renderizarEntregas).
+function atualizarEstadoLocalAposAcao(vendaId, tipo) {
+    if (tipo === 'chegou') {
+        const entrega = (ultimasEntregasCarregadas || []).find(e => e.id === vendaId);
+        if (entrega) entrega.status_entrega = 'chegou_local';
+    }
+}
+
+// Reaplica em ultimasEntregasCarregadas qualquer "cheguei no local" que
+// ainda está na fila offline (servidor ainda não sabe) - chamado toda vez
+// que a lista é recarregada do servidor, pra essa mudança local não se
+// perder até a sincronização de verdade acontecer.
+function reaplicarPendentesLocalmente() {
+    Object.entries(pendentesOfflineEmMemoria).forEach(([vendaId, item]) => {
+        if (item.tipo === 'chegou') atualizarEstadoLocalAposAcao(vendaId, 'chegou');
+    });
+}
+
+async function guardarPendenteOffline(vendaId, tipo, dadosExtras) {
+    pendentesOfflineEmMemoria[vendaId] = { tipo, ...dadosExtras, salvo_em: Date.now() };
     await salvarObjetoLocal(CHAVE_PENDENTES_OFFLINE, pendentesOfflineEmMemoria);
 }
 
-// Tenta mandar pro servidor toda entrega que foi confirmada offline e
-// ainda está esperando - chamado sempre que a internet volta (evento
-// 'online') e no início de carregarEntregas() sempre que já está online.
-// O entregador nunca precisa fazer nada manualmente pra isso acontecer.
+// Tenta mandar pro servidor toda ação que foi feita offline e ainda está
+// esperando - chamado sempre que a internet volta (evento 'online') e no
+// início de carregarEntregas() sempre que já está online. O entregador
+// nunca precisa fazer nada manualmente pra isso acontecer.
 let sincronizandoPendentesOffline = false;
 async function sincronizarPendentesOffline() {
     if (sincronizandoPendentesOffline) return; // evita duas sincronizações ao mesmo tempo
@@ -576,17 +615,18 @@ async function sincronizarPendentesOffline() {
     sincronizandoPendentesOffline = true;
     for (const vendaId of idsPendentes) {
         const item = pendentesOfflineEmMemoria[vendaId];
+        const { url, body } = montarChamadaAcaoMotoboy(vendaId, item.tipo, item);
         try {
-            const resposta = await fetch(`${API_BASE}/motoboy_marcar_entregue.php`, {
+            await fetch(url, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ token: tokenAtual, venda_id: vendaId, codigo_confirmacao: item.codigo_confirmacao }),
+                body: JSON.stringify(body),
             });
-            const resultado = await resposta.json();
             // Sucesso OU erro "não encontrada" (ex: outro entregador/a loja
             // já mexeu nela nesse meio-tempo) - dos dois jeitos, tira da
             // fila, senão ficava tentando pra sempre uma coisa que nunca
-            // vai dar certo. Só mantém na fila em caso de falha de REDE.
+            // vai dar certo. Só mantém na fila em caso de falha de REDE
+            // (o catch abaixo, quando o fetch nem consegue completar).
             delete pendentesOfflineEmMemoria[vendaId];
         } catch (e) {
             // Ainda sem internet de verdade (ou instável) - mantém na fila, tenta de novo na próxima.
@@ -594,7 +634,7 @@ async function sincronizarPendentesOffline() {
     }
     await salvarObjetoLocal(CHAVE_PENDENTES_OFFLINE, pendentesOfflineEmMemoria);
     sincronizandoPendentesOffline = false;
-    renderizarEntregas(ultimasEntregasCarregadas);
+    carregarEntregas(); // busca a lista de verdade do servidor de novo, já refletindo o que acabou de sincronizar
 }
 
 // Assim que a internet volta (o navegador/Android avisa sozinho), tenta
@@ -604,21 +644,7 @@ window.addEventListener('online', () => { sincronizarPendentesOffline(); });
 
 async function marcarNaoAtendido(vendaId) {
     if (!confirm('Confirma que ninguém atendeu nesse endereço? O pedido vai ser cancelado - o horário e sua localização atual ficam registrados.')) return;
-    try {
-        const resposta = await fetch(`${API_BASE}/motoboy_marcar_nao_atendido.php`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ token: tokenAtual, venda_id: vendaId }),
-        });
-        const resultado = await resposta.json();
-        if (resultado.status === 'sucesso') {
-            carregarEntregas();
-        } else {
-            alert(resultado.mensagem || 'Não foi possível registrar. Tente de novo.');
-        }
-    } catch (e) {
-        alert('Erro de conexão. Tente de novo.');
-    }
+    await enviarAcaoMotoboy(vendaId, 'nao_atendido', {});
 }
 
 // ---------- Aba Mapa ----------
