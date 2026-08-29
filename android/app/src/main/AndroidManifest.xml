@@ -33,9 +33,61 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths"></meta-data>
         </provider>
+
+        <!-- Exigido pelo plugin @capacitor-community/background-geolocation
+             pra poder rodar o rastreio como um "serviço em primeiro
+             plano" de verdade (com notificação fixa) - SEM essa
+             declaração, o Android (principalmente a partir da versão 14)
+             recusa iniciar esse serviço, e o rastreio em segundo plano
+             simplesmente não funciona OU o app trava ao tentar iniciar
+             uma entrega. Nome exato do serviço conforme a documentação
+             oficial do plugin - não pode ser alterado. -->
+        <service
+            android:name="com.equimaps.capacitor_background_geolocation.BackgroundGeolocationService"
+            android:enabled="true"
+            android:exported="true"
+            android:foregroundServiceType="location" />
     </application>
 
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- Localização: as duas primeiras (fina/aproximada) já eram
+         necessárias antes; a de "segundo plano" é a que faltava de
+         verdade - sem ela, o Android só entrega localização enquanto o
+         app está ABERTO na tela ("permitir apenas durante o uso"), nunca
+         com o app minimizado, não importa o que o app peça via
+         JavaScript. É ela quem faz o Android mostrar a opção "Permitir o
+         tempo todo" na tela de permissão (em vez de só "Enquanto usa o
+         app"). -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+
+    <!-- Serviço em primeiro plano (o que mantém o rastreio rodando com o
+         app minimizado, com aquela notificação fixa "Compartilhando sua
+         localização..."). FOREGROUND_SERVICE_LOCATION é a permissão NOVA
+         que passou a ser obrigatória a partir do Android 14 (API 34) pra
+         qualquer serviço em primeiro plano do tipo "location" - como o
+         app mira o SDK 36, sem ela o Android recusa iniciar o serviço. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+
+    <!-- A partir do Android 13, mostrar QUALQUER notificação (inclusive a
+         notificação fixa do rastreio em segundo plano) exige essa
+         permissão em tempo de execução - sem ela, o serviço até roda,
+         mas sem conseguir avisar visualmente o entregador que o rastreio
+         está ativo. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <uses-feature android:name="android.hardware.location.gps" />
+
+    <!-- Usada pelo MainActivity.java pra pedir que o Android pare de
+         "otimizar" (isto é, poder encerrar) esse app quando ele estiver
+         em segundo plano - celulares Xiaomi/Samsung/Motorola costumam
+         ser bem agressivos matando apps minimizados pra economizar
+         bateria, mesmo com o serviço em primeiro plano configurado
+         certinho. -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 </manifest>
