@@ -404,7 +404,7 @@ function renderizarEntregas(entregas) {
                     <p class="font-bold text-slate-800">${escapeHtml(e.cliente_nome || 'Cliente')}${e.numero_pedido ? ` <span class="text-xs text-slate-400 font-normal">#${escapeHtml(e.numero_pedido)}</span>` : ''}</p>
                     ${tagStatus}
                 </div>
-                <p class="text-xs text-slate-400 mb-1">${e.data_venda ? new Date(e.data_venda.replace(' ', 'T')).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : ''}${e.cliente_telefone ? ` · <a href="tel:${e.cliente_telefone.replace(/\D/g, '')}" class="text-blue-600 font-semibold" onclick="event.stopPropagation()">📞 ${escapeHtml(e.cliente_telefone)}</a>` : ''}</p>
+                <p class="text-xs text-slate-400 mb-1">${e.data_venda ? new Date(e.data_venda.replace(' ', 'T')).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : ''}${e.cliente_telefone ? ` · <a href="tel:${e.cliente_telefone.replace(/\D/g, '')}" class="text-blue-600 font-semibold" onclick="event.stopPropagation()">📞 ${escapeHtml(e.cliente_telefone)}</a>${linkWhatsappCliente(e.cliente_telefone)}` : ''}</p>
                 <p class="text-sm text-slate-600 mb-1">📍 ${escapeHtml(e.endereco_entrega || 'Endereço não informado')}</p>
                 <p class="text-xs text-slate-500 mb-2">${montarResumoItens(e.itens)}</p>
                 ${naoAtendido && e.motivo_cancelamento ? `<p class="text-xs text-orange-700 bg-orange-50 border border-orange-100 rounded-lg px-2 py-1.5 mb-2">${escapeHtml(e.motivo_cancelamento)}</p>` : ''}
@@ -443,7 +443,7 @@ function renderizarEntregas(entregas) {
                 <p class="font-bold text-slate-800">${escapeHtml(e.cliente_nome || 'Cliente')}${e.numero_pedido ? ` <span class="text-xs text-slate-400 font-normal">#${escapeHtml(e.numero_pedido)}</span>` : ''}</p>
                 ${tagTopo}
             </div>
-            <p class="text-xs text-slate-400 mb-1">${e.cliente_telefone ? `<a href="tel:${e.cliente_telefone.replace(/\D/g, '')}" class="text-blue-600 font-semibold" onclick="event.stopPropagation()">📞 ${escapeHtml(e.cliente_telefone)}</a>` : ''}</p>
+            <p class="text-xs text-slate-400 mb-1">${e.cliente_telefone ? `<a href="tel:${e.cliente_telefone.replace(/\D/g, '')}" class="text-blue-600 font-semibold" onclick="event.stopPropagation()">📞 ${escapeHtml(e.cliente_telefone)}</a>${linkWhatsappCliente(e.cliente_telefone)}` : ''}</p>
             <p class="text-sm text-slate-600 mb-1">📍 ${escapeHtml(e.endereco_entrega || 'Endereço não informado')}</p>
             <p class="text-xs text-slate-500 mb-2">🛍️ ${montarResumoItens(e.itens) || 'Itens não informados'}</p>
             <div class="mb-3">${montarInfoPagamento(e)}</div>
@@ -667,7 +667,7 @@ function renderizarMapa() {
     lista.innerHTML = ativas.map(e => `
         <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-4">
             <p class="font-bold text-slate-800 mb-1">${escapeHtml(e.cliente_nome || 'Cliente')}</p>
-            ${e.cliente_telefone ? `<a href="tel:${e.cliente_telefone.replace(/\D/g, '')}" class="inline-block text-sm text-blue-600 font-semibold mb-1">📞 ${escapeHtml(e.cliente_telefone)}</a>` : ''}
+            ${e.cliente_telefone ? `<a href="tel:${e.cliente_telefone.replace(/\D/g, '')}" class="inline-block text-sm text-blue-600 font-semibold mb-1">📞 ${escapeHtml(e.cliente_telefone)}</a>${linkWhatsappCliente(e.cliente_telefone)}` : ''}
             <p class="text-sm text-slate-600 mb-3">📍 ${escapeHtml(e.endereco_entrega || 'Endereço não informado')}</p>
             <a href="https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(e.endereco_entrega || '')}" target="_blank" class="block w-full text-center bg-blue-700 hover:bg-blue-800 text-white font-bold py-2.5 rounded-lg text-sm">🗺️ Abrir rota no Google Maps</a>
         </div>
@@ -893,6 +893,18 @@ function atualizarIndicadorGps(estado) {
 }
 
 // ---------- Utilidade ----------
+
+// Ícone de WhatsApp clicável (abre o wa.me direto com o número do
+// cliente) - reaproveitado nos 3 lugares que mostram o telefone do
+// cliente (lista de entregas, histórico e aba Mapa).
+function linkWhatsappCliente(telefone) {
+    if (!telefone) return '';
+    const digitos = telefone.replace(/\D/g, '');
+    const numeroCompleto = digitos.length <= 11 ? '55' + digitos : digitos;
+    return `<a href="https://wa.me/${numeroCompleto}" target="_blank" onclick="event.stopPropagation()" title="Chamar no WhatsApp" class="inline-flex items-center justify-center w-4 h-4 align-text-bottom ml-1.5">
+        <svg viewBox="0 0 24 24" fill="#25D366" class="w-full h-full"><path d="M12.04 2C6.58 2 2.13 6.45 2.13 11.91c0 1.75.46 3.45 1.32 4.95L2.05 22l5.25-1.38c1.45.79 3.08 1.21 4.74 1.21h.01c5.46 0 9.91-4.45 9.91-9.91C21.96 6.45 17.5 2 12.04 2zm5.83 14.19c-.25.7-1.44 1.36-1.99 1.44-.51.08-1.15.11-1.86-.12-.43-.13-.98-.32-1.69-.62-2.98-1.29-4.93-4.28-5.08-4.48-.15-.2-1.21-1.61-1.21-3.07 0-1.46.77-2.18 1.04-2.48.27-.3.6-.37.8-.37.2 0 .4 0 .58.01.18.01.44-.07.68.53.25.6.86 2.07.93 2.22.07.15.12.33.02.53-.1.2-.15.33-.3.5-.15.18-.31.4-.44.53-.15.15-.3.31-.13.61.17.3.76 1.26 1.64 2.04 1.13 1 2.08 1.31 2.38 1.46.3.15.47.13.65-.08.17-.2.73-.85.93-1.15.2-.3.4-.24.66-.15.27.1 1.73.82 2.02.97.3.15.49.22.57.35.07.13.07.75-.18 1.45z"/></svg>
+    </a>`;
+}
 
 function escapeHtml(texto) {
     const div = document.createElement('div');
