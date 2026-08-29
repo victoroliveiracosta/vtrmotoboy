@@ -7,6 +7,19 @@
 
 const API_BASE = 'https://vtrpdv.com/api';
 const CHAVE_TOKEN = 'vtr_motoboy_token';
+// Códigos de confirmação de entrega (quando a loja liga essa opção) -
+// guardados no aparelho assim que a lista de entregas é baixada, pra
+// funcionar mesmo se a internet cair bem na hora de confirmar a entrega
+// (ver salvarCodigosConfirmacaoLocal/marcarEntregue). Sobrevive até o app
+// ser fechado/reaberto, diferente de uma variável comum em memória.
+const CHAVE_CODIGOS_CONFIRMACAO = 'vtr_motoboy_codigos_confirmacao';
+// Entregas que o entregador já confirmou (código certo digitado) enquanto
+// estava OFFLINE - ficam guardadas aqui até a internet voltar e o app
+// conseguir avisar o servidor de verdade. O entregador NUNCA fica travado
+// esperando internet só pra continuar trabalhando: assim que confirma
+// certo, a entrega já some da lista dele (ver renderizarEntregas), mesmo
+// sem servidor nenhum saber disso ainda.
+const CHAVE_PENDENTES_OFFLINE = 'vtr_motoboy_pendentes_offline';
 
 let tokenAtual = null;
 let watcherIdGps = null;
@@ -14,9 +27,46 @@ let intervalAtualizarEntregas = null;
 let ultimasEntregasCarregadas = [];
 let motoboyIdAtual = null;
 let motoboyTelefoneAtual = null;
+// Espelho em memória de CHAVE_PENDENTES_OFFLINE, pra renderizarEntregas()
+// conseguir filtrar a lista sem precisar virar uma função assíncrona (o
+// Preferences do Capacitor é sempre assíncrono) - toda vez que
+// carregarPendentesOfflineLocal()/salvarPendentesOfflineLocal() rodam,
+// esse espelho é atualizado junto.
+let pendentesOfflineEmMemoria = {};
+// Qual entrega está com o modal de código aberto no momento (setado por
+// marcarEntregue, lido por confirmarCodigoEntregaDigitado).
+let vendaIdAguardandoCodigo = null;
 
 function pluginsCapacitor() {
     return (window.Capacitor && window.Capacitor.Plugins) || {};
+}
+
+// ---------- Preferences: helpers genéricos pra guardar/ler um objeto
+// JSON qualquer no aparelho (usados pelos códigos de confirmação e pela
+// fila de entregas pendentes de sincronizar) ----------
+async function salvarObjetoLocal(chave, objeto) {
+    const texto = JSON.stringify(objeto || {});
+    const { Preferences } = pluginsCapacitor();
+    if (Preferences) {
+        await Preferences.set({ key: chave, value: texto });
+    } else {
+        localStorage.setItem(chave, texto); // fallback pra testar num navegador comum
+    }
+}
+async function lerObjetoLocal(chave) {
+    const { Preferences } = pluginsCapacitor();
+    let texto = null;
+    if (Preferences) {
+        const resultado = await Preferences.get({ key: chave });
+        texto = resultado.value;
+    } else {
+        texto = localStorage.getItem(chave);
+    }
+    try {
+        return texto ? JSON.parse(texto) : {};
+    } catch (e) {
+        return {};
+    }
 }
 
 // ---------- Preferences (guarda o token no aparelho) ----------
@@ -127,6 +177,12 @@ async function iniciarAppLogado(token, nomeMotoboy) {
     mostrarTela('tela-principal');
     mudarAbaPrincipal('entregas');
 
+    // Carrega a fila de entregas confirmadas offline ANTES da primeira
+    // renderização - se o app foi fechado e reaberto ainda sem internet,
+    // essas entregas já continuam fora da lista (e a sincronização já
+    // roda assim que carregarEntregas() perceber que voltou o sinal).
+    await carregarPendentesOfflineLocal();
+
     await iniciarRastreioGps();
     await carregarEntregas();
 
@@ -231,6 +287,11 @@ async function carregarEntregas() {
     if (!tokenAtual) return;
     const lista = document.getElementById('lista-entregas');
 
+    // Antes de mais nada, se a internet estiver de volta, tenta mandar
+    // pro servidor qualquer entrega que foi confirmada offline (código
+    // certo digitado sem sinal) e ainda está esperando pra sincronizar.
+    if (navigator.onLine) sincronizarPendentesOffline();
+
     try {
         const historico = abaEntregasMotoboyAtual === 'historico' ? '&historico=1' : '';
         const resposta = await fetch(`${API_BASE}/motoboy_minhas_entregas.php?token=${encodeURIComponent(tokenAtual)}${historico}`);
@@ -244,12 +305,37 @@ async function carregarEntregas() {
         ultimasEntregasCarregadas = resultado.entregas || [];
         if (resultado.motoboy_id) motoboyIdAtual = resultado.motoboy_id;
         if (resultado.motoboy_telefone) motoboyTelefoneAtual = resultado.motoboy_telefone;
+        // Guarda os códigos de confirmação de cada entrega no aparelho -
+        // é isso que permite confirmar a entrega mesmo sem internet depois
+        // (ver marcarEntregue). Só entregas ativas têm código pra guardar
+        // (histórico não precisa mais).
+        if (abaEntregasMotoboyAtual !== 'historico') salvarCodigosConfirmacaoLocal(ultimasEntregasCarregadas);
         renderizarEntregas(ultimasEntregasCarregadas);
         if (abaPrincipalAtual === 'mapa') renderizarMapa();
         if (abaPrincipalAtual === 'perfil') carregarPerfil();
     } catch (e) {
         // Falha de rede isolada não precisa incomodar - só mantém a lista antiga na tela.
     }
+}
+
+// Guarda, no aparelho, o código de confirmação de cada entrega ativa -
+// assim, se a internet cair bem na hora de confirmar com o cliente, o
+// código já está aí, sem depender de nenhuma chamada de rede pra
+// conferir se está certo.
+async function salvarCodigosConfirmacaoLocal(entregas) {
+    const mapa = {};
+    (entregas || []).forEach(e => {
+        if (e.codigo_confirmacao_entrega) mapa[e.id] = String(e.codigo_confirmacao_entrega);
+    });
+    await salvarObjetoLocal(CHAVE_CODIGOS_CONFIRMACAO, mapa);
+}
+
+// Carrega a fila de entregas confirmadas offline (código certo digitado
+// sem internet, ainda esperando pra avisar o servidor) - chamado uma vez
+// no início do app, pra já filtrar elas da lista antes mesmo da primeira
+// sincronização rodar.
+async function carregarPendentesOfflineLocal() {
+    pendentesOfflineEmMemoria = await lerObjetoLocal(CHAVE_PENDENTES_OFFLINE);
 }
 
 function montarResumoItens(itens) {
@@ -267,10 +353,27 @@ function montarResumoItens(itens) {
 
 function renderizarEntregas(entregas) {
     const lista = document.getElementById('lista-entregas');
+
+    // Tira da lista quem já foi confirmado offline (código certo já
+    // digitado, só esperando a internet voltar pra avisar o servidor) -
+    // pro entregador, aquela entrega já está resolvida, não faz sentido
+    // continuar aparecendo como pendente pra ele.
+    if (abaEntregasMotoboyAtual !== 'historico') {
+        entregas = entregas.filter(e => !pendentesOfflineEmMemoria[e.id]);
+    }
+
+    const qtdPendentesSincronizar = Object.keys(pendentesOfflineEmMemoria).length;
+    const avisoPendentes = qtdPendentesSincronizar > 0
+        ? `<div class="bg-amber-50 border border-amber-200 text-amber-800 text-xs rounded-xl p-3 mb-3 flex items-center gap-2">
+             <span class="text-lg">🔄</span>
+             <span>${qtdPendentesSincronizar} entrega${qtdPendentesSincronizar > 1 ? 's' : ''} confirmada${qtdPendentesSincronizar > 1 ? 's' : ''} sem internet - já ${qtdPendentesSincronizar > 1 ? 'estão' : 'está'} resolvida${qtdPendentesSincronizar > 1 ? 's' : ''}, só falta avisar a loja assim que a internet voltar.</span>
+           </div>`
+        : '';
+
     if (entregas.length === 0) {
-        lista.innerHTML = abaEntregasMotoboyAtual === 'historico'
+        lista.innerHTML = avisoPendentes + (abaEntregasMotoboyAtual === 'historico'
             ? '<p class="text-center text-slate-400 py-10 text-sm">Nenhuma entrega no histórico ainda.</p>'
-            : '<p class="text-center text-slate-400 py-10 text-sm">Nenhuma entrega no momento. 🎉</p>';
+            : '<p class="text-center text-slate-400 py-10 text-sm">Nenhuma entrega no momento. 🎉</p>');
         return;
     }
 
@@ -299,7 +402,7 @@ function renderizarEntregas(entregas) {
         return;
     }
 
-    lista.innerHTML = entregas.map(e => {
+    lista.innerHTML = avisoPendentes + entregas.map(e => {
         const chegouLocal = e.status_entrega === 'chegou_local';
         const tagTopo = chegouLocal
             ? '<span class="bg-amber-50 text-amber-700 px-2 py-0.5 rounded-full text-xs font-bold flex-shrink-0">⏳ Aguardando cliente</span>'
@@ -357,24 +460,147 @@ async function marcarChegueiNoLocal(vendaId) {
     }
 }
 
-async function marcarEntregue(vendaId) {
-    if (!confirm('Confirmar que essa entrega foi feita?')) return;
-    try {
-        const resposta = await fetch(`${API_BASE}/motoboy_marcar_entregue.php`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ token: tokenAtual, venda_id: vendaId }),
-        });
-        const resultado = await resposta.json();
-        if (resultado.status === 'sucesso') {
-            carregarEntregas();
-        } else {
-            alert(resultado.mensagem || 'Não foi possível marcar como entregue.');
-        }
-    } catch (e) {
-        alert('Erro de conexão. Tente de novo.');
-    }
+// Busca o código de confirmação de uma entrega específica, primeiro na
+// lista que já está em memória (mais rápido, cobre o caso comum) e, se
+// não achar (app foi reaberto no meio da rota, por exemplo), no que foi
+// salvo no aparelho da última vez que a lista foi baixada com internet.
+async function buscarCodigoConfirmacaoLocal(vendaId) {
+    const daMemoria = (ultimasEntregasCarregadas || []).find(e => e.id === vendaId);
+    if (daMemoria && daMemoria.codigo_confirmacao_entrega) return String(daMemoria.codigo_confirmacao_entrega);
+    const mapaSalvo = await lerObjetoLocal(CHAVE_CODIGOS_CONFIRMACAO);
+    return mapaSalvo[vendaId] || null;
 }
+
+async function marcarEntregue(vendaId) {
+    const codigoExigido = await buscarCodigoConfirmacaoLocal(vendaId);
+
+    // Essa entrega não tem código de confirmação (loja não usa essa
+    // opção, ou o motoboy não tem app segundo a loja - mas nesse caso ele
+    // nem estaria vendo essa tela) - confirma direto, do jeito de sempre.
+    if (!codigoExigido) {
+        if (!confirm('Confirmar que essa entrega foi feita?')) return;
+        await enviarConfirmacaoEntrega(vendaId, null);
+        return;
+    }
+
+    // Precisa do código - abre o modal em vez do confirm() simples.
+    vendaIdAguardandoCodigo = vendaId;
+    document.getElementById('input-codigo-confirmacao').value = '';
+    document.getElementById('erro-codigo-confirmacao').classList.add('hidden');
+    document.getElementById('modal-codigo-confirmacao').classList.remove('hidden');
+    setTimeout(() => document.getElementById('input-codigo-confirmacao')?.focus(), 150);
+}
+
+function fecharModalCodigoConfirmacao() {
+    document.getElementById('modal-codigo-confirmacao').classList.add('hidden');
+    vendaIdAguardandoCodigo = null;
+}
+
+// Confere o código digitado CONTRA O QUE JÁ ESTÁ SALVO NO APARELHO - essa
+// conferência não depende de internet nenhuma. Se bater, confirma a
+// entrega (online de verdade, ou guardada numa fila local se não tiver
+// sinal agora); se não bater, mostra erro na hora, mesmo sem internet.
+async function confirmarCodigoEntregaDigitado() {
+    const vendaId = vendaIdAguardandoCodigo;
+    if (!vendaId) return;
+    const codigoDigitado = (document.getElementById('input-codigo-confirmacao').value || '').trim();
+    const erroEl = document.getElementById('erro-codigo-confirmacao');
+
+    if (codigoDigitado.length < 4) {
+        erroEl.textContent = 'Digite o código de 4 números.';
+        erroEl.classList.remove('hidden');
+        return;
+    }
+
+    const codigoCorreto = await buscarCodigoConfirmacaoLocal(vendaId);
+    if (codigoDigitado !== codigoCorreto) {
+        erroEl.textContent = 'Código incorreto. Confira com o cliente e tente de novo.';
+        erroEl.classList.remove('hidden');
+        return;
+    }
+
+    document.getElementById('modal-codigo-confirmacao').classList.add('hidden');
+    vendaIdAguardandoCodigo = null;
+    await enviarConfirmacaoEntrega(vendaId, codigoDigitado);
+}
+
+// Manda a confirmação pro servidor - se der certo, ótimo. Se não tiver
+// internet (ou a chamada falhar por qualquer motivo de rede), guarda numa
+// fila local em vez de travar o entregador: a entrega já some da lista
+// dele na hora (ver renderizarEntregas), e a sincronização de verdade
+// acontece sozinha assim que a internet voltar (ver
+// sincronizarPendentesOffline, chamado toda vez que carregarEntregas roda).
+async function enviarConfirmacaoEntrega(vendaId, codigoConfirmacao) {
+    if (navigator.onLine) {
+        try {
+            const resposta = await fetch(`${API_BASE}/motoboy_marcar_entregue.php`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ token: tokenAtual, venda_id: vendaId, codigo_confirmacao: codigoConfirmacao }),
+            });
+            const resultado = await resposta.json();
+            if (resultado.status === 'sucesso') {
+                carregarEntregas();
+                return;
+            }
+            // Erro de verdade do servidor (não é problema de conexão) -
+            // avisa e NÃO guarda na fila offline, senão ia ficar tentando
+            // sincronizar um erro que nunca vai se resolver sozinho.
+            alert(resultado.mensagem || 'Não foi possível marcar como entregue.');
+            return;
+        } catch (e) {
+            // Caiu no meio da chamada (tinha sinal, mas oscilou) - trata
+            // como offline mesmo, guarda na fila em vez de travar o
+            // entregador.
+        }
+    }
+    await guardarPendenteOffline(vendaId, codigoConfirmacao);
+    renderizarEntregas(ultimasEntregasCarregadas);
+}
+
+async function guardarPendenteOffline(vendaId, codigoConfirmacao) {
+    pendentesOfflineEmMemoria[vendaId] = { codigo_confirmacao: codigoConfirmacao, salvo_em: Date.now() };
+    await salvarObjetoLocal(CHAVE_PENDENTES_OFFLINE, pendentesOfflineEmMemoria);
+}
+
+// Tenta mandar pro servidor toda entrega que foi confirmada offline e
+// ainda está esperando - chamado sempre que a internet volta (evento
+// 'online') e no início de carregarEntregas() sempre que já está online.
+// O entregador nunca precisa fazer nada manualmente pra isso acontecer.
+let sincronizandoPendentesOffline = false;
+async function sincronizarPendentesOffline() {
+    if (sincronizandoPendentesOffline) return; // evita duas sincronizações ao mesmo tempo
+    const idsPendentes = Object.keys(pendentesOfflineEmMemoria);
+    if (idsPendentes.length === 0 || !tokenAtual) return;
+
+    sincronizandoPendentesOffline = true;
+    for (const vendaId of idsPendentes) {
+        const item = pendentesOfflineEmMemoria[vendaId];
+        try {
+            const resposta = await fetch(`${API_BASE}/motoboy_marcar_entregue.php`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ token: tokenAtual, venda_id: vendaId, codigo_confirmacao: item.codigo_confirmacao }),
+            });
+            const resultado = await resposta.json();
+            // Sucesso OU erro "não encontrada" (ex: outro entregador/a loja
+            // já mexeu nela nesse meio-tempo) - dos dois jeitos, tira da
+            // fila, senão ficava tentando pra sempre uma coisa que nunca
+            // vai dar certo. Só mantém na fila em caso de falha de REDE.
+            delete pendentesOfflineEmMemoria[vendaId];
+        } catch (e) {
+            // Ainda sem internet de verdade (ou instável) - mantém na fila, tenta de novo na próxima.
+        }
+    }
+    await salvarObjetoLocal(CHAVE_PENDENTES_OFFLINE, pendentesOfflineEmMemoria);
+    sincronizandoPendentesOffline = false;
+    renderizarEntregas(ultimasEntregasCarregadas);
+}
+
+// Assim que a internet volta (o navegador/Android avisa sozinho), tenta
+// sincronizar na hora, sem esperar a próxima atualização automática da
+// lista (que pode demorar alguns segundos).
+window.addEventListener('online', () => { sincronizarPendentesOffline(); });
 
 async function marcarNaoAtendido(vendaId) {
     if (!confirm('Confirma que ninguém atendeu nesse endereço? O pedido vai ser cancelado - o horário e sua localização atual ficam registrados.')) return;

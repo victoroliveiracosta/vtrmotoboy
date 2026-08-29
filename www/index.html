@@ -139,6 +139,28 @@
         </div>
     </div>
 
+    <!-- MODAL: código de confirmação de entrega (quando a loja liga essa
+         opção) - funciona MESMO OFFLINE, porque o código de cada entrega
+         já é baixado e guardado no aparelho assim que a lista de entregas
+         é carregada (ver salvarCodigosConfirmacaoLocal em app.js). -->
+    <div id="modal-codigo-confirmacao" class="hidden fixed inset-0 bg-black/50 z-50 flex items-end sm:items-center justify-center p-4">
+        <div class="bg-white rounded-t-2xl sm:rounded-2xl shadow-2xl p-6 w-full max-w-sm">
+            <div class="text-center mb-4">
+                <div class="text-4xl mb-2">🔑</div>
+                <h3 class="font-bold text-lg text-slate-800">Código de confirmação</h3>
+                <p class="text-sm text-slate-500 mt-1">Peça pro cliente informar o código que ele recebeu por WhatsApp.</p>
+            </div>
+            <input id="input-codigo-confirmacao" type="text" inputmode="numeric" maxlength="4" placeholder="0000"
+                   class="w-full border border-slate-300 rounded-xl p-4 text-center text-3xl tracking-[0.5em] font-bold mb-2" autocomplete="off"
+                   oninput="this.value = this.value.replace(/\D/g, '')" onkeydown="if(event.key==='Enter') confirmarCodigoEntregaDigitado()">
+            <p id="erro-codigo-confirmacao" class="hidden text-sm text-red-600 text-center mb-3"></p>
+            <div class="flex gap-2">
+                <button onclick="fecharModalCodigoConfirmacao()" class="flex-1 bg-slate-100 text-slate-600 font-semibold py-3 rounded-xl">Cancelar</button>
+                <button onclick="confirmarCodigoEntregaDigitado()" class="flex-1 bg-green-600 hover:bg-green-700 text-white font-bold py-3 rounded-xl">Confirmar</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Tela de carregamento inicial -->
     <div id="tela-carregando" class="min-h-screen flex items-center justify-center">
         <div class="text-slate-400 text-sm">Carregando...</div>
