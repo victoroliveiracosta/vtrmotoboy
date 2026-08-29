@@ -34,18 +34,17 @@
                 android:resource="@xml/file_paths"></meta-data>
         </provider>
 
-        <!-- Exigido pelo plugin @capacitor-community/background-geolocation
-             pra poder rodar o rastreio como um "serviço em primeiro
-             plano" de verdade (com notificação fixa) - SEM essa
-             declaração, o Android (principalmente a partir da versão 14)
-             recusa iniciar esse serviço, e o rastreio em segundo plano
-             simplesmente não funciona OU o app trava ao tentar iniciar
-             uma entrega. Nome exato do serviço conforme a documentação
-             oficial do plugin - não pode ser alterado. -->
+        <!-- Serviço de rastreio PRÓPRIO (LocationTrackingService.java,
+             nessa mesma pasta) - substitui o serviço do plugin
+             @capacitor-community/background-geolocation, que não estava
+             mandando localização de forma confiável com o app minimizado.
+             android:foregroundServiceType="location" é obrigatório a
+             partir do Android 14 (API 34) pra esse tipo de serviço
+             conseguir rodar - sem isso, o Android recusa iniciar. -->
         <service
-            android:name="com.equimaps.capacitor_background_geolocation.BackgroundGeolocationService"
+            android:name=".LocationTrackingService"
             android:enabled="true"
-            android:exported="true"
+            android:exported="false"
             android:foregroundServiceType="location" />
     </application>
 

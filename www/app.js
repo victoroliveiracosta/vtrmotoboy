@@ -161,7 +161,7 @@ async function fazerLogin() {
 
 function sair() {
     if (!confirm('Sair e parar o rastreamento?')) return;
-    pararRastreioGps();
+    ficarOffline();
     if (intervalAtualizarEntregas) clearInterval(intervalAtualizarEntregas);
     apagarTokenLocal();
     tokenAtual = null;
@@ -183,7 +183,10 @@ async function iniciarAppLogado(token, nomeMotoboy) {
     // roda assim que carregarEntregas() perceber que voltou o sinal).
     await carregarPendentesOfflineLocal();
 
-    await iniciarRastreioGps();
+    // Já entra online automaticamente (comportamento de sempre) - o
+    // entregador pode escolher ficar offline manualmente depois, pelo
+    // botão no topo da tela (ver alternarOnlineOffline).
+    await ficarOnline();
     await carregarEntregas();
 
     // Atualiza a lista de entregas sozinha de tempos em tempos, pra
@@ -835,84 +838,150 @@ function carregarPerfil() {
     document.getElementById('perfil-id').textContent = motoboyIdAtual ? `ID do entregador: ${motoboyIdAtual}` : '';
 }
 
-// ---------- Rastreio GPS em segundo plano ----------
-// "backgroundMessage" preenchido faz o Android manter uma notificação
-// fixa e continuar mandando localização mesmo com a tela apagada ou o
-// app em segundo plano - é essa notificação que garante que o sistema
-// operacional não mate o processo, diferente de um site/PWA comum.
+// ---------- Rastreio GPS em segundo plano (LocationTracking nativo) ----------
+// Usa o plugin PRÓPRIO LocationTrackingPlugin (ver
+// android/app/.../LocationTrackingPlugin.java e LocationTrackingService.java)
+// - não depende mais do @capacitor-community/background-geolocation, que
+// não estava mandando localização de forma confiável com o app
+// minimizado ou a tela apagada. A diferença principal: agora é o próprio
+// SERVIÇO NATIVO (Java) que manda a localização pro servidor direto via
+// HTTP, sem passar pelo JavaScript/WebView - por isso continua
+// funcionando de verdade com a tela apagada, já que não depende do
+// WebView estar "acordado" pra nada.
+//
+// "Ficar Online"/"Ficar Offline" é uma escolha EXPLÍCITA do entregador
+// (botão no topo da tela) - ao entrar no app já fica online automaticamente
+// (comportamento de sempre), mas ele pode escolher ficar offline pra fazer
+// uma pausa, por exemplo.
 
-async function iniciarRastreioGps() {
-    const { BackgroundGeolocation } = pluginsCapacitor();
-    if (!BackgroundGeolocation) {
-        console.warn('Plugin de geolocalização não disponível (rodando fora do app nativo?).');
+let entregadorEstaOnline = false;
+
+async function ficarOnline() {
+    const { LocationTracking } = pluginsCapacitor();
+    if (!LocationTracking) {
+        console.warn('Plugin LocationTracking não disponível (rodando fora do app nativo?).');
         return;
     }
 
     atualizarIndicadorGps('conectando');
 
+    // 1) Confere se o GPS do aparelho está ligado (sem isso, nem adianta
+    // ter permissão - o Android não vai entregar posição nenhuma).
     try {
-        watcherIdGps = await BackgroundGeolocation.addWatcher(
-            {
-                backgroundTitle: 'VTR Entregador - Entrega em andamento',
-                backgroundMessage: 'Compartilhando sua localização com a loja durante a entrega.',
-                requestPermissions: true,
-                distanceFilter: 15, // só manda atualização se andar uns 15m - economiza bateria/dados
-            },
-            (posicao, erro) => {
-                if (erro) {
-                    if (erro.code === 'NOT_AUTHORIZED') {
-                        document.getElementById('aviso-permissao').classList.remove('hidden');
-                        atualizarIndicadorGps('sem-permissao');
-                    }
-                    return;
-                }
-                document.getElementById('aviso-permissao').classList.add('hidden');
-                atualizarIndicadorGps('ativo');
-                if (posicao) {
-                    enviarLocalizacaoServidor(posicao.latitude, posicao.longitude);
-                }
-                // Aproveita esse "tique" pra também tentar sincronizar
-                // qualquer ação offline pendente (chegou/entregue/não
-                // atendido) - IMPORTANTE: esse callback do
-                // BackgroundGeolocation é a ÚNICA parte do app que
-                // continua rodando de verdade mesmo com o app minimizado
-                // (é o que permite o rastreio ao vivo continuar). Sem
-                // aproveitar esse gancho, a sincronização só acontecia
-                // quando o entregador REABRIA o app na tela (ver
-                // configurarAtualizacaoAoVoltarParaFrente) - se ele desse
-                // "chegou"/"entregue" sem internet e fosse pra tela
-                // inicial do celular sem abrir o app de novo, a loja só
-                // ficava sabendo horas depois, quando ele lembrasse de
-                // abrir. Agora, o próprio GPS rodando em segundo plano já
-                // resolve isso sozinho.
-                if (navigator.onLine) sincronizarPendentesOffline();
-            }
-        );
+        const statusGps = await LocationTracking.isGpsEnabled();
+        if (!statusGps.enabled) {
+            atualizarIndicadorGps('erro');
+            alert('Ative a localização (GPS) do seu celular pra ficar online.');
+            return;
+        }
+    } catch (e) { /* método pode falhar em versões antigas do Android - segue tentando mesmo assim */ }
+
+    // 2) Confere/pede a permissão de localização normal ("Durante o uso do app").
+    let permissoes = await LocationTracking.checkPermissions();
+    if (permissoes.location !== 'granted') {
+        permissoes = await LocationTracking.requestPermissions();
+    }
+    if (permissoes.location !== 'granted') {
+        document.getElementById('aviso-permissao').classList.remove('hidden');
+        atualizarIndicadorGps('sem-permissao');
+        return;
+    }
+    document.getElementById('aviso-permissao').classList.add('hidden');
+
+    // 3) Tenta pedir a permissão de segundo plano também (funciona de
+    // verdade só no Android 10; do 11 em diante o Android não mostra essa
+    // opção em nenhuma caixinha - por isso o aviso guiando pra
+    // Configurações continua rodando de qualquer jeito, ver
+    // verificarEavisarPermissaoSegundoPlano mais abaixo).
+    try { await LocationTracking.requestBackgroundPermission(); } catch (e) { /* Android 11+ pode não conseguir mostrar isso - segue normalmente */ }
+
+    // 4) Inicia o serviço nativo de verdade.
+    try {
+        await LocationTracking.startTracking({ token: tokenAtual, apiBase: API_BASE });
+        entregadorEstaOnline = true;
+        atualizarIndicadorGps('ativo');
+        atualizarBotaoOnlineOffline();
+        verificarEavisarPermissaoSegundoPlano();
     } catch (e) {
-        console.error('Erro ao iniciar rastreio GPS:', e);
+        console.error('Erro ao iniciar o rastreio:', e);
         atualizarIndicadorGps('erro');
     }
 }
 
-async function pararRastreioGps() {
-    const { BackgroundGeolocation } = pluginsCapacitor();
-    if (BackgroundGeolocation && watcherIdGps) {
-        try { await BackgroundGeolocation.removeWatcher({ id: watcherIdGps }); } catch (e) { /* já parado */ }
-        watcherIdGps = null;
+async function ficarOffline() {
+    const { LocationTracking } = pluginsCapacitor();
+    if (LocationTracking) {
+        try { await LocationTracking.stopTracking(); } catch (e) { /* já parado */ }
+    }
+    entregadorEstaOnline = false;
+    atualizarIndicadorGps('offline');
+    atualizarBotaoOnlineOffline();
+}
+
+function alternarOnlineOffline() {
+    if (entregadorEstaOnline) {
+        if (confirm('Ficar offline? Você para de aparecer disponível pra novas entregas e a loja para de ver sua localização.')) {
+            ficarOffline();
+        }
+    } else {
+        ficarOnline();
     }
 }
 
-async function enviarLocalizacaoServidor(latitude, longitude) {
-    if (!tokenAtual) return;
-    try {
-        await fetch(`${API_BASE}/atualizar_localizacao_motoboy.php`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ token: tokenAtual, latitude, longitude }),
-        });
-    } catch (e) {
-        // Falha isolada de rede não é grave - a próxima posição corrige sozinha.
+function atualizarBotaoOnlineOffline() {
+    const botao = document.getElementById('botao-online-offline');
+    if (!botao) return;
+    botao.textContent = entregadorEstaOnline ? 'Ficar offline' : 'Ficar online';
+    botao.className = entregadorEstaOnline
+        ? 'text-xs font-semibold px-3 py-1.5 rounded-full bg-red-50 text-red-600 border border-red-200'
+        : 'text-xs font-semibold px-3 py-1.5 rounded-full bg-green-50 text-green-700 border border-green-200';
+}
+// Chave usada pra lembrar (no aparelho, sobrevive fechar/abrir o app) que
+// esse aviso já foi mostrado uma vez - não fica repetindo toda hora.
+const CHAVE_AVISO_PERMISSAO_SEGUNDO_PLANO = 'vtr_motoboy_avisou_permissao_segundo_plano';
+
+// A PARTIR DO ANDROID 11, a opção "Permitir o tempo todo" NUNCA MAIS
+// aparece na caixinha de permissão de localização normal (só "Durante o
+// uso do app", "Apenas esta vez" e "Não permitir" - exatamente as 3
+// opções que aparecem hoje) - o Google tirou essa opção de propósito da
+// caixinha, por privacidade. A única forma de conseguir essa permissão
+// agora é a pessoa entrar em Configurações do aparelho > apps > VTR
+// Entregador > Permissões > Localização, e escolher "Permitir o tempo
+// todo" manualmente lá dentro. Sem isso, o rastreio para de funcionar
+// assim que a tela apaga ou o app é minimizado, mesmo com a notificação
+// fixa configurada certinho - exatamente o sintoma relatado (GPS "some"
+// do topo quando a tela apaga).
+//
+// A solução é mostrar um aviso claro guiando a pessoa até lá - só uma
+// vez, logo depois de ficar online com sucesso.
+async function verificarEavisarPermissaoSegundoPlano() {
+    const { LocationTracking } = pluginsCapacitor();
+    if (!LocationTracking) return; // essa etapa só existe no app nativo Android
+
+    const jaAvisou = await lerObjetoLocal(CHAVE_AVISO_PERMISSAO_SEGUNDO_PLANO);
+    if (jaAvisou && jaAvisou.avisado) return;
+
+    const modal = document.getElementById('modal-permissao-segundo-plano');
+    if (modal) modal.classList.remove('hidden');
+}
+
+function fecharAvisoPermissaoSegundoPlano() {
+    document.getElementById('modal-permissao-segundo-plano')?.classList.add('hidden');
+    // Só marca como "já avisado" (pra não repetir de novo) quando a
+    // pessoa realmente abre as configurações (ver
+    // abrirConfiguracoesPermissaoSegundoPlano) - "Fazer isso depois" só
+    // fecha por agora, e o aviso volta a aparecer na próxima vez que o
+    // GPS conectar, até a pessoa realmente resolver.
+}
+
+// Leva a pessoa DIRETO pra tela de permissões do app - de lá, é só tocar
+// em "Localização" e escolher "Permitir o tempo todo".
+async function abrirConfiguracoesPermissaoSegundoPlano() {
+    const { LocationTracking } = pluginsCapacitor();
+    if (LocationTracking) {
+        try { await LocationTracking.openAppSettings(); } catch (e) { /* aparelho bloqueou o atalho - a pessoa consegue abrir na mão também */ }
     }
+    fecharAvisoPermissaoSegundoPlano();
 }
 
 function atualizarIndicadorGps(estado) {
@@ -922,6 +991,7 @@ function atualizarIndicadorGps(estado) {
     const cores = {
         conectando: ['bg-slate-300', 'Conectando...'],
         ativo: ['bg-green-400', 'GPS ativo'],
+        offline: ['bg-slate-300', 'Offline'],
         'sem-permissao': ['bg-red-400', 'Sem permissão'],
         erro: ['bg-red-400', 'Erro no GPS'],
     };
@@ -954,8 +1024,8 @@ function escapeHtml(texto) {
 
 document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('aviso-permissao').addEventListener('click', async () => {
-        const { BackgroundGeolocation } = pluginsCapacitor();
-        if (BackgroundGeolocation) await BackgroundGeolocation.openSettings();
+        const { LocationTracking } = pluginsCapacitor();
+        if (LocationTracking) await LocationTracking.openAppSettings();
     });
 
     const tokenSalvo = await lerTokenLocal();

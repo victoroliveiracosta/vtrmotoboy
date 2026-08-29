@@ -41,6 +41,7 @@
                     <span id="ponto-gps" class="w-2 h-2 rounded-full bg-slate-300"></span>
                     <span id="texto-gps">GPS</span>
                 </span>
+                <button id="botao-online-offline" onclick="alternarOnlineOffline()" class="text-xs font-semibold px-3 py-1.5 rounded-full bg-green-50 text-green-700 border border-green-200">Ficar online</button>
                 <button onclick="sair()" class="text-blue-100 text-xs underline flex-shrink-0">Sair</button>
             </div>
         </div>
@@ -157,6 +158,36 @@
             <div class="flex gap-2">
                 <button onclick="fecharModalCodigoConfirmacao()" class="flex-1 bg-slate-100 text-slate-600 font-semibold py-3 rounded-xl">Cancelar</button>
                 <button onclick="confirmarCodigoEntregaDigitado()" class="flex-1 bg-green-600 hover:bg-green-700 text-white font-bold py-3 rounded-xl">Confirmar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL: aviso de "Permitir o tempo todo" - a partir do Android 11,
+         essa opção NUNCA aparece na caixinha de permissão normal, só
+         dentro de Configurações do aparelho (ver
+         verificarEavisarPermissaoSegundoPlano em app.js). Sem isso, o
+         rastreio para assim que a tela apaga ou o app é minimizado, que é
+         exatamente o comportamento que precisa evitar. -->
+    <div id="modal-permissao-segundo-plano" class="hidden fixed inset-0 bg-black/50 z-50 flex items-end sm:items-center justify-center p-4">
+        <div class="bg-white rounded-t-2xl sm:rounded-2xl shadow-2xl p-6 w-full max-w-sm">
+            <div class="text-center mb-4">
+                <div class="text-4xl mb-2">📍</div>
+                <h3 class="font-bold text-lg text-slate-800">Um passo a mais é necessário</h3>
+                <p class="text-sm text-slate-500 mt-2">
+                    O Android esconde a opção de rastreio o tempo todo dentro das configurações - não aparece na telinha de permissão normal.
+                </p>
+            </div>
+            <div class="bg-amber-50 border border-amber-200 rounded-xl p-3 text-sm text-amber-800 mb-4">
+                Sem esse passo, o app <strong>para de mandar sua localização</strong> assim que você apaga a tela ou minimiza o app durante uma entrega.
+            </div>
+            <ol class="text-sm text-slate-600 space-y-2 mb-5 list-decimal list-inside">
+                <li>Toque no botão abaixo pra abrir as permissões do app</li>
+                <li>Toque em <strong>"Localização"</strong></li>
+                <li>Escolha <strong>"Permitir o tempo todo"</strong></li>
+            </ol>
+            <div class="space-y-2">
+                <button onclick="abrirConfiguracoesPermissaoSegundoPlano()" class="w-full bg-blue-700 hover:bg-blue-800 text-white font-bold py-3 rounded-xl">Abrir configurações agora</button>
+                <button onclick="fecharAvisoPermissaoSegundoPlano()" class="w-full text-slate-400 text-sm py-1.5">Fazer isso depois</button>
             </div>
         </div>
     </div>

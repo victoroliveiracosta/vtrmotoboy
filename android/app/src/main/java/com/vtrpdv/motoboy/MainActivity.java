@@ -11,6 +11,11 @@ import com.getcapacitor.BridgeActivity;
 public class MainActivity extends BridgeActivity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
+        // Precisa ser chamado ANTES do super.onCreate() - é assim que a
+        // documentação oficial do Capacitor manda registrar plugins
+        // nativos próprios do projeto (LocationTrackingPlugin é o nosso,
+        // ver esse arquivo na mesma pasta).
+        registerPlugin(LocationTrackingPlugin.class);
         super.onCreate(savedInstanceState);
         pedirParaIgnorarOtimizacaoDeBateria();
     }
