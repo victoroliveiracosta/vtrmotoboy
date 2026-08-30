@@ -183,7 +183,15 @@ async function iniciarAppLogado(token, nomeMotoboy) {
     // aparelho já concedeu ou já negou antes, o Android nem mostra nada
     // aqui, só devolve o estado atual - só aparece a caixinha de verdade
     // na PRIMEIRA vez.
-    pedirPermissaoNotificacao();
+    //
+    // TEM QUE SER "await" AQUI, esperando terminar de verdade antes de
+    // continuar: o Android só deixa UMA caixinha de permissão na tela por
+    // vez. ficarOnline() (chamado logo abaixo) também pede permissão -
+    // de localização. Sem esse "await", as duas caixinhas eram
+    // disparadas quase juntas (essa aqui e a de localização segundos
+    // depois), e o Android cancelava/ignorava uma delas silenciosamente -
+    // na prática, a de notificação nunca chegava a aparecer de verdade.
+    await pedirPermissaoNotificacao();
 
     // Carrega a fila de entregas confirmadas offline ANTES da primeira
     // renderização - se o app foi fechado e reaberto ainda sem internet,
@@ -244,6 +252,10 @@ function configurarAtualizacaoAoVoltarParaFrente() {
         // enquanto estava com a tela apagada, pode não ter tido nenhum
         // tique de GPS pra disparar isso - aqui é a garantia final.
         if (navigator.onLine) sincronizarPendentesOffline();
+        // Se o entregador tocou no banner de notificação, foi em
+        // Configurações e ativou lá na mão, o banner precisa sumir assim
+        // que ele voltar pro app - sem esperar o próximo login.
+        atualizarAvisoPermissaoNotificacao();
     };
 
     const { App: AppPlugin } = pluginsCapacitor();
@@ -897,12 +909,32 @@ function carregarPerfil() {
 // mostra a caixinha de novo, só devolve o estado; a notificação de
 // entrega nova em si é mostrada pelo LocationTrackingService nativo (ver
 // checarEntregasNovas lá), não daqui.
+//
+// IMPORTANTE: o Android só mostra a caixinha do sistema pedindo essa
+// permissão UMA VEZ por instalação - se o entregador já negou antes
+// (mesmo numa versão anterior do app, antes dessa função existir), ela
+// nunca mais aparece sozinha, não importa quantas vezes o app chame de
+// novo. Por isso, sempre que a permissão continuar sem estar concedida
+// depois de tentar, mostra um banner fixo (igual o de localização) com
+// um atalho direto pra Configurações - é o único jeito de reverter isso
+// nesse caso.
 async function pedirPermissaoNotificacao() {
     const { LocationTracking } = pluginsCapacitor();
     if (!LocationTracking) return; // só existe no app nativo Android
     try {
         await LocationTracking.requestNotificationPermission();
-    } catch (e) { /* aparelho recusou mostrar a caixinha - segue normal, só sem notificação de entrega nova nesse caso */ }
+    } catch (e) { /* aparelho recusou mostrar a caixinha - segue normal, o banner abaixo ainda cobre esse caso */ }
+    await atualizarAvisoPermissaoNotificacao();
+}
+
+async function atualizarAvisoPermissaoNotificacao() {
+    const { LocationTracking } = pluginsCapacitor();
+    const banner = document.getElementById('aviso-permissao-notificacao');
+    if (!LocationTracking || !banner) return;
+    try {
+        const permissoes = await LocationTracking.checkPermissions();
+        banner.classList.toggle('hidden', permissoes.notifications === 'granted');
+    } catch (e) { /* não conseguiu checar agora - deixa o banner como estava */ }
 }
 
 let entregadorEstaOnline = false;
@@ -1083,6 +1115,10 @@ function escapeHtml(texto) {
 
 document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('aviso-permissao').addEventListener('click', async () => {
+        const { LocationTracking } = pluginsCapacitor();
+        if (LocationTracking) await LocationTracking.openAppSettings();
+    });
+    document.getElementById('aviso-permissao-notificacao')?.addEventListener('click', async () => {
         const { LocationTracking } = pluginsCapacitor();
         if (LocationTracking) await LocationTracking.openAppSettings();
     });
