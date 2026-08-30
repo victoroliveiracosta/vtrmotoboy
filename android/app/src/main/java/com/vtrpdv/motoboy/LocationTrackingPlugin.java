@@ -1,10 +1,6 @@
 package com.vtrpdv.motoboy;
 
 import android.Manifest;
-import android.app.Notification;
-import android.app.NotificationChannel;
-import android.app.NotificationManager;
-import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
@@ -12,8 +8,6 @@ import android.location.LocationManager;
 import android.net.Uri;
 import android.os.Build;
 import android.provider.Settings;
-import androidx.core.app.NotificationCompat;
-import androidx.core.app.NotificationManagerCompat;
 import androidx.core.content.ContextCompat;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.PermissionState;
@@ -23,7 +17,6 @@ import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 import com.getcapacitor.annotation.Permission;
 import com.getcapacitor.annotation.PermissionCallback;
-import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Ponte entre o JavaScript do app (www/app.js) e o LocationTrackingService
@@ -35,12 +28,20 @@ import java.util.concurrent.atomic.AtomicInteger;
  * a tela apagada. Esse plugin usa um Foreground Service escrito na mão
  * (LocationTrackingService), sem depender de nenhuma biblioteca de
  * terceiro pra parte de rastreio em si.
+ *
+ * A notificação de "entrega nova" NÃO é mostrada por aqui - ela é
+ * construída direto dentro do LocationTrackingService (que faz sua
+ * própria checagem periódica de entregas, independente do app estar
+ * aberto/minimizado/com a tela apagada). Ver checarEntregasNovas() lá.
+ * Esse plugin só cuida das permissões (localização e notificação) e de
+ * ligar/desligar o serviço.
  */
 @CapacitorPlugin(
     name = "LocationTracking",
     permissions = {
         @Permission(alias = "location", strings = { Manifest.permission.ACCESS_COARSE_LOCATION, Manifest.permission.ACCESS_FINE_LOCATION }),
-        @Permission(alias = "backgroundLocation", strings = { Manifest.permission.ACCESS_BACKGROUND_LOCATION })
+        @Permission(alias = "backgroundLocation", strings = { Manifest.permission.ACCESS_BACKGROUND_LOCATION }),
+        @Permission(alias = "notifications", strings = { Manifest.permission.POST_NOTIFICATIONS })
     }
 )
 public class LocationTrackingPlugin extends Plugin {
@@ -55,6 +56,15 @@ public class LocationTrackingPlugin extends Plugin {
             resultado.put("backgroundLocation", getPermissionState("backgroundLocation").toString());
         } else {
             resultado.put("backgroundLocation", "granted");
+        }
+        // Antes do Android 13 (TIRAMISU) não existe permissão de
+        // notificação nenhuma pra pedir - qualquer notificação já pode
+        // aparecer direto, então trata como "já concedida" pra não
+        // confundir a tela com um estado que nem existe nessa versão.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            resultado.put("notifications", getPermissionState("notifications").toString());
+        } else {
+            resultado.put("notifications", "granted");
         }
         call.resolve(resultado);
     }
@@ -95,6 +105,38 @@ public class LocationTrackingPlugin extends Plugin {
     @PermissionCallback
     private void backgroundLocationCallback(PluginCall call) {
         checkPermissions(call);
+    }
+
+    // Mostra (se necessário) a caixinha do sistema pedindo permissão de
+    // notificação (POST_NOTIFICATIONS) - só existe/só faz algo a partir
+    // do Android 13. Chamado UMA VEZ, logo depois do login (ver
+    // pedirPermissaoNotificacao em www/app.js), pra já aparecer sozinho
+    // na primeira abertura do app, em vez do entregador precisar entrar
+    // manualmente em Configurações pra ativar. Se ele já concedeu antes,
+    // ou já negou "não perguntar de novo", o Android nem mostra nada e
+    // isso só devolve o estado atual na hora.
+    @PluginMethod()
+    public void requestNotificationPermission(PluginCall call) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+            JSObject resultado = new JSObject();
+            resultado.put("granted", true);
+            call.resolve(resultado);
+            return;
+        }
+        if (getPermissionState("notifications") == PermissionState.GRANTED) {
+            JSObject resultado = new JSObject();
+            resultado.put("granted", true);
+            call.resolve(resultado);
+            return;
+        }
+        requestPermissionForAlias("notifications", call, "notificationPermCallback");
+    }
+
+    @PermissionCallback
+    private void notificationPermCallback(PluginCall call) {
+        JSObject resultado = new JSObject();
+        resultado.put("granted", Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU || getPermissionState("notifications") == PermissionState.GRANTED);
+        call.resolve(resultado);
     }
 
     // A PARTIR DO ANDROID 11, o próprio Android não mostra mais a opção
@@ -174,69 +216,5 @@ public class LocationTrackingPlugin extends Plugin {
         JSObject resultado = new JSObject();
         resultado.put("online", prefs.getBoolean("online", false));
         call.resolve(resultado);
-    }
-
-    // ---------- Notificação de entrega nova ----------
-    // Canal SEPARADO do canal de rastreio (que é IMPORTANCE_LOW, sem som,
-    // de propósito, pra não incomodar o entregador o tempo todo enquanto
-    // está online) - esse aqui é IMPORTANCE_HIGH, com som e vibração,
-    // porque uma entrega nova é algo que realmente precisa chamar atenção
-    // na hora, mesmo com o app minimizado ou a tela apagada. Chamado de
-    // www/app.js (ver avisarNovasEntregas) toda vez que a lista de
-    // entregas percebe um id que não estava lá antes.
-    private static final String CANAL_NOVA_ENTREGA_ID = "vtr_entregador_nova_entrega";
-    private static final AtomicInteger contadorNotificacaoEntrega = new AtomicInteger(6000);
-
-    @PluginMethod()
-    public void notificarEntrega(PluginCall call) {
-        String titulo = call.getString("titulo", "🛵 Nova entrega pra você!");
-        String mensagem = call.getString("mensagem", "Toque pra ver os detalhes.");
-
-        Context contexto = getContext();
-        criarCanalNovaEntregaSeNecessario(contexto);
-
-        Intent intentAbrirApp = contexto.getPackageManager().getLaunchIntentForPackage(contexto.getPackageName());
-        PendingIntent pendingIntent = PendingIntent.getActivity(
-            contexto, 0, intentAbrirApp,
-            Build.VERSION.SDK_INT >= Build.VERSION_CODES.M
-                ? (PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE)
-                : PendingIntent.FLAG_UPDATE_CURRENT
-        );
-
-        Notification notificacao = new NotificationCompat.Builder(contexto, CANAL_NOVA_ENTREGA_ID)
-            .setContentTitle(titulo)
-            .setContentText(mensagem)
-            .setSmallIcon(android.R.drawable.ic_menu_mylocation)
-            .setContentIntent(pendingIntent)
-            .setAutoCancel(true)
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setDefaults(NotificationCompat.DEFAULT_SOUND | NotificationCompat.DEFAULT_VIBRATE)
-            .build();
-
-        try {
-            // ID crescente: cada entrega nova vira uma notificação própria
-            // (empilha na barra), em vez de ir substituindo a anterior.
-            NotificationManagerCompat.from(contexto).notify(contadorNotificacaoEntrega.incrementAndGet(), notificacao);
-            call.resolve();
-        } catch (SecurityException e) {
-            // Android 13+ exige a permissão POST_NOTIFICATIONS - se a
-            // pessoa negou, só não mostra a notificação (a lista de
-            // entregas continua funcionando normalmente do mesmo jeito).
-            call.reject("Sem permissão de notificação.");
-        }
-    }
-
-    private void criarCanalNovaEntregaSeNecessario(Context contexto) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            NotificationChannel canal = new NotificationChannel(
-                CANAL_NOVA_ENTREGA_ID,
-                "Nova entrega atribuída",
-                NotificationManager.IMPORTANCE_HIGH
-            );
-            canal.setDescription("Avisa com som quando uma entrega nova é atribuída a você.");
-            canal.enableVibration(true);
-            NotificationManager gerenciador = contexto.getSystemService(NotificationManager.class);
-            if (gerenciador != null) gerenciador.createNotificationChannel(canal);
-        }
     }
 }

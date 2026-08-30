@@ -11,6 +11,11 @@
     .safe-bottom { padding-bottom: env(safe-area-inset-bottom); }
     .header-gradient { background: linear-gradient(135deg, #0033E0 0%, #1D5CFF 100%); }
     .barra-ganho { transition: height .3s ease; }
+    /* Animação do modal de "entrega confirmada" - ver modal-entrega-concluida */
+    @keyframes popIn { 0% { transform: scale(.5); opacity: 0; } 60% { transform: scale(1.06); opacity: 1; } 100% { transform: scale(1); } }
+    .anim-pop-in { animation: popIn .35s cubic-bezier(.34,1.56,.64,1); }
+    @keyframes checkDraw { from { stroke-dashoffset: 48; } to { stroke-dashoffset: 0; } }
+    .anim-check-draw { stroke-dasharray: 48; stroke-dashoffset: 48; animation: checkDraw .4s ease-out .15s forwards; }
 </style>
 </head>
 <body class="bg-slate-50 min-h-screen">
@@ -189,6 +194,25 @@
                 <button onclick="abrirConfiguracoesPermissaoSegundoPlano()" class="w-full bg-blue-700 hover:bg-blue-800 text-white font-bold py-3 rounded-xl">Abrir configurações agora</button>
                 <button onclick="fecharAvisoPermissaoSegundoPlano()" class="w-full text-slate-400 text-sm py-1.5">Fazer isso depois</button>
             </div>
+        </div>
+    </div>
+
+    <!-- MODAL: entrega confirmada com sucesso - aparece um instante e some
+         sozinho. Antes disso, depois de digitar o código certo (ou
+         confirmar sem código, quando a loja não usa essa opção), o app
+         só voltava direto pra lista de entregas sem mostrar nada -
+         parecia que não tinha acontecido nada, mesmo tendo dado tudo
+         certo. Chamado por mostrarSucessoEntregaConcluida() em app.js. -->
+    <div id="modal-entrega-concluida" class="hidden fixed inset-0 bg-black/40 z-[60] flex items-center justify-center p-4" onclick="this.classList.add('hidden')">
+        <div class="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-xs text-center anim-pop-in">
+            <div class="w-20 h-20 rounded-full bg-green-100 flex items-center justify-center mx-auto mb-4">
+                <svg viewBox="0 0 52 52" class="w-11 h-11">
+                    <circle cx="26" cy="26" r="25" fill="none" stroke="#16a34a" stroke-width="2"/>
+                    <path fill="none" stroke="#16a34a" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" d="M14 27l8 8 16-16" class="anim-check-draw"/>
+                </svg>
+            </div>
+            <h3 class="font-bold text-xl text-slate-800 mb-1">Entrega confirmada!</h3>
+            <p id="texto-entrega-concluida-sub" class="text-sm text-slate-500">A loja já foi avisada.</p>
         </div>
     </div>
 

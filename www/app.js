@@ -177,6 +177,14 @@ async function iniciarAppLogado(token, nomeMotoboy) {
     mostrarTela('tela-principal');
     mudarAbaPrincipal('entregas');
 
+    // Pede a permissão de notificação (Android 13+) logo na entrada -
+    // antes disso, o app nunca perguntava isso sozinho, e o entregador
+    // precisava achar essa opção na mão lá em Configurações. Se o
+    // aparelho já concedeu ou já negou antes, o Android nem mostra nada
+    // aqui, só devolve o estado atual - só aparece a caixinha de verdade
+    // na PRIMEIRA vez.
+    pedirPermissaoNotificacao();
+
     // Carrega a fila de entregas confirmadas offline ANTES da primeira
     // renderização - se o app foi fechado e reaberto ainda sem internet,
     // essas entregas já continuam fora da lista (e a sincronização já
@@ -330,10 +338,6 @@ async function carregarEntregas() {
         ultimasEntregasCarregadas = resultado.entregas || [];
         if (resultado.motoboy_id) motoboyIdAtual = resultado.motoboy_id;
         if (resultado.motoboy_telefone) motoboyTelefoneAtual = resultado.motoboy_telefone;
-        // Só avisa de entrega nova na aba "Ativas" - no histórico os ids
-        // que aparecem são de entregas já concluídas/canceladas, não faz
-        // sentido notificar nada a partir deles.
-        if (abaEntregasMotoboyAtual !== 'historico') avisarNovasEntregas(ultimasEntregasCarregadas);
         // Reaplica localmente qualquer "cheguei no local" que ainda está
         // esperando a internet voltar pra sincronizar de verdade - sem
         // isso, essa atualização da lista (que reflete o que o SERVIDOR
@@ -354,45 +358,15 @@ async function carregarEntregas() {
     }
 }
 
-// Notifica o entregador (som + notificação do Android, mesmo com o app
-// minimizado) quando uma entrega NOVA aparece na lista - antes disso, ele
-// só ficava sabendo de uma entrega nova abrindo o app e olhando a lista
-// na mão, ou esperando até 15s do próximo "tique" automático, sem nenhum
-// aviso sonoro.
-//
-// idsEntregasConhecidas começa null (ainda não carregou nada nessa sessão
-// do app) - na PRIMEIRA carga, só guarda os ids que já existem, sem
-// notificar nada; senão, toda entrega que já estava atribuída ANTES de
-// abrir o app ia disparar uma notificação à toa, como se fosse nova.
-let idsEntregasConhecidas = null;
-
-function avisarNovasEntregas(entregas) {
-    const idsAtuais = new Set((entregas || []).map(e => e.id));
-    if (idsEntregasConhecidas === null) {
-        idsEntregasConhecidas = idsAtuais;
-        return;
-    }
-
-    const novas = (entregas || []).filter(e => !idsEntregasConhecidas.has(e.id));
-    idsEntregasConhecidas = idsAtuais;
-    if (novas.length === 0) return;
-
-    const { LocationTracking } = pluginsCapacitor();
-    if (!LocationTracking) return; // notificação nativa só existe no app Android (ver LocationTrackingPlugin.notificarEntrega)
-
-    if (novas.length === 1) {
-        const e = novas[0];
-        LocationTracking.notificarEntrega({
-            titulo: '🛵 Nova entrega pra você!',
-            mensagem: (e.cliente_nome ? e.cliente_nome + ' - ' : '') + (e.endereco_entrega || 'toque pra ver os detalhes'),
-        }).catch(() => { /* Android 13+ sem permissão de notificação - a lista continua funcionando normal */ });
-    } else {
-        LocationTracking.notificarEntrega({
-            titulo: '🛵 Novas entregas pra você!',
-            mensagem: `${novas.length} entregas novas foram atribuídas a você`,
-        }).catch(() => { /* idem */ });
-    }
-}
+// A notificação de "entrega nova" NÃO é disparada por aqui (não dá pra
+// confiar num setInterval do JavaScript pra isso - o Android suspende o
+// WebView e para esse tipo de temporizador assim que o app é minimizado,
+// a tela apaga, ou o entregador entra em outro app tipo WhatsApp, que é
+// bem o cenário que a gente mais precisa notificar). Quem faz essa
+// checagem e mostra a notificação é o LocationTrackingService nativo
+// (ver checarEntregasNovas lá), que continua rodando o tempo todo
+// independente do estado do app - mesmo motivo pelo qual o rastreio de
+// GPS também foi movido pra lá.
 
 // Guarda, no aparelho, o código de confirmação de cada entrega ativa -
 // assim, se a internet cair bem na hora de confirmar com o cliente, o
@@ -541,6 +515,23 @@ async function buscarCodigoConfirmacaoLocal(vendaId) {
     return mapaSalvo[vendaId] || null;
 }
 
+// Mostra o modal de "Entrega confirmada!" com o símbolo de OK animado -
+// some sozinho depois de um tempinho (não precisa o entregador tocar em
+// nada). Antes disso, depois de digitar o código certo (ou confirmar sem
+// código), o app só voltava direto pra lista, sem nenhum retorno visual
+// de que tinha dado tudo certo.
+function mostrarSucessoEntregaConcluida(offline) {
+    const modal = document.getElementById('modal-entrega-concluida');
+    if (!modal) return;
+    const sub = document.getElementById('texto-entrega-concluida-sub');
+    if (sub) sub.textContent = offline
+        ? 'Sem internet agora - vai avisar a loja assim que a conexão voltar.'
+        : 'A loja já foi avisada.';
+    modal.classList.remove('hidden');
+    clearTimeout(mostrarSucessoEntregaConcluida._timer);
+    mostrarSucessoEntregaConcluida._timer = setTimeout(() => modal.classList.add('hidden'), 2200);
+}
+
 async function marcarEntregue(vendaId) {
     const codigoExigido = await buscarCodigoConfirmacaoLocal(vendaId);
 
@@ -626,6 +617,7 @@ async function enviarAcaoMotoboy(vendaId, tipo, dadosExtras) {
             });
             const resultado = await resposta.json();
             if (resultado.status === 'sucesso') {
+                if (tipo === 'entregue') mostrarSucessoEntregaConcluida(false);
                 carregarEntregas();
                 return;
             }
@@ -639,6 +631,7 @@ async function enviarAcaoMotoboy(vendaId, tipo, dadosExtras) {
             // como offline mesmo, guarda na fila em vez de travar o entregador.
         }
     }
+    if (tipo === 'entregue') mostrarSucessoEntregaConcluida(true);
     await guardarPendenteOffline(vendaId, tipo, dadosExtras);
     atualizarEstadoLocalAposAcao(vendaId, tipo);
     renderizarEntregas(ultimasEntregasCarregadas);
@@ -897,6 +890,20 @@ function carregarPerfil() {
 // (botão no topo da tela) - ao entrar no app já fica online automaticamente
 // (comportamento de sempre), mas ele pode escolher ficar offline pra fazer
 // uma pausa, por exemplo.
+
+// Pede a permissão de notificação (POST_NOTIFICATIONS, só existe a partir
+// do Android 13) - chamado uma vez a cada login/abertura do app. Se já
+// tiver sido concedida (ou negada permanentemente) antes, o Android nem
+// mostra a caixinha de novo, só devolve o estado; a notificação de
+// entrega nova em si é mostrada pelo LocationTrackingService nativo (ver
+// checarEntregasNovas lá), não daqui.
+async function pedirPermissaoNotificacao() {
+    const { LocationTracking } = pluginsCapacitor();
+    if (!LocationTracking) return; // só existe no app nativo Android
+    try {
+        await LocationTracking.requestNotificationPermission();
+    } catch (e) { /* aparelho recusou mostrar a caixinha - segue normal, só sem notificação de entrega nova nesse caso */ }
+}
 
 let entregadorEstaOnline = false;
 
