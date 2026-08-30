@@ -330,6 +330,10 @@ async function carregarEntregas() {
         ultimasEntregasCarregadas = resultado.entregas || [];
         if (resultado.motoboy_id) motoboyIdAtual = resultado.motoboy_id;
         if (resultado.motoboy_telefone) motoboyTelefoneAtual = resultado.motoboy_telefone;
+        // Só avisa de entrega nova na aba "Ativas" - no histórico os ids
+        // que aparecem são de entregas já concluídas/canceladas, não faz
+        // sentido notificar nada a partir deles.
+        if (abaEntregasMotoboyAtual !== 'historico') avisarNovasEntregas(ultimasEntregasCarregadas);
         // Reaplica localmente qualquer "cheguei no local" que ainda está
         // esperando a internet voltar pra sincronizar de verdade - sem
         // isso, essa atualização da lista (que reflete o que o SERVIDOR
@@ -347,6 +351,46 @@ async function carregarEntregas() {
         if (abaPrincipalAtual === 'perfil') carregarPerfil();
     } catch (e) {
         // Falha de rede isolada não precisa incomodar - só mantém a lista antiga na tela.
+    }
+}
+
+// Notifica o entregador (som + notificação do Android, mesmo com o app
+// minimizado) quando uma entrega NOVA aparece na lista - antes disso, ele
+// só ficava sabendo de uma entrega nova abrindo o app e olhando a lista
+// na mão, ou esperando até 15s do próximo "tique" automático, sem nenhum
+// aviso sonoro.
+//
+// idsEntregasConhecidas começa null (ainda não carregou nada nessa sessão
+// do app) - na PRIMEIRA carga, só guarda os ids que já existem, sem
+// notificar nada; senão, toda entrega que já estava atribuída ANTES de
+// abrir o app ia disparar uma notificação à toa, como se fosse nova.
+let idsEntregasConhecidas = null;
+
+function avisarNovasEntregas(entregas) {
+    const idsAtuais = new Set((entregas || []).map(e => e.id));
+    if (idsEntregasConhecidas === null) {
+        idsEntregasConhecidas = idsAtuais;
+        return;
+    }
+
+    const novas = (entregas || []).filter(e => !idsEntregasConhecidas.has(e.id));
+    idsEntregasConhecidas = idsAtuais;
+    if (novas.length === 0) return;
+
+    const { LocationTracking } = pluginsCapacitor();
+    if (!LocationTracking) return; // notificação nativa só existe no app Android (ver LocationTrackingPlugin.notificarEntrega)
+
+    if (novas.length === 1) {
+        const e = novas[0];
+        LocationTracking.notificarEntrega({
+            titulo: '🛵 Nova entrega pra você!',
+            mensagem: (e.cliente_nome ? e.cliente_nome + ' - ' : '') + (e.endereco_entrega || 'toque pra ver os detalhes'),
+        }).catch(() => { /* Android 13+ sem permissão de notificação - a lista continua funcionando normal */ });
+    } else {
+        LocationTracking.notificarEntrega({
+            titulo: '🛵 Novas entregas pra você!',
+            mensagem: `${novas.length} entregas novas foram atribuídas a você`,
+        }).catch(() => { /* idem */ });
     }
 }
 
@@ -936,10 +980,6 @@ function atualizarBotaoOnlineOffline() {
         ? 'text-xs font-semibold px-3 py-1.5 rounded-full bg-red-50 text-red-600 border border-red-200'
         : 'text-xs font-semibold px-3 py-1.5 rounded-full bg-green-50 text-green-700 border border-green-200';
 }
-// Chave usada pra lembrar (no aparelho, sobrevive fechar/abrir o app) que
-// esse aviso já foi mostrado uma vez - não fica repetindo toda hora.
-const CHAVE_AVISO_PERMISSAO_SEGUNDO_PLANO = 'vtr_motoboy_avisou_permissao_segundo_plano';
-
 // A PARTIR DO ANDROID 11, a opção "Permitir o tempo todo" NUNCA MAIS
 // aparece na caixinha de permissão de localização normal (só "Durante o
 // uso do app", "Apenas esta vez" e "Não permitir" - exatamente as 3
@@ -952,14 +992,27 @@ const CHAVE_AVISO_PERMISSAO_SEGUNDO_PLANO = 'vtr_motoboy_avisou_permissao_segund
 // fixa configurada certinho - exatamente o sintoma relatado (GPS "some"
 // do topo quando a tela apaga).
 //
-// A solução é mostrar um aviso claro guiando a pessoa até lá - só uma
-// vez, logo depois de ficar online com sucesso.
+// A solução é mostrar um aviso claro guiando a pessoa até lá - mas SÓ
+// quando a permissão realmente ainda não foi concedida. Antes, isso era
+// controlado por uma flag salva no aparelho ("já avisei uma vez") que
+// nunca era escrita em lugar nenhum - o aviso aparecia TODA VEZ que o
+// app abria, mesmo com "Permitir o tempo todo" já ativado nas
+// configurações. Agora confere o estado de verdade da permissão a cada
+// vez (LocationTracking.checkPermissions() -> backgroundLocation) - só
+// concedida de verdade faz o aviso parar de aparecer, não uma flag que
+// podia ficar dessincronizada do que a pessoa realmente escolheu lá nas
+// configurações do Android.
 async function verificarEavisarPermissaoSegundoPlano() {
     const { LocationTracking } = pluginsCapacitor();
     if (!LocationTracking) return; // essa etapa só existe no app nativo Android
 
-    const jaAvisou = await lerObjetoLocal(CHAVE_AVISO_PERMISSAO_SEGUNDO_PLANO);
-    if (jaAvisou && jaAvisou.avisado) return;
+    let permissoes;
+    try {
+        permissoes = await LocationTracking.checkPermissions();
+    } catch (e) {
+        return; // não conseguiu checar agora - não incomoda com o aviso à toa.
+    }
+    if (permissoes.backgroundLocation === 'granted') return; // já ativado - nada a avisar.
 
     const modal = document.getElementById('modal-permissao-segundo-plano');
     if (modal) modal.classList.remove('hidden');
@@ -967,11 +1020,10 @@ async function verificarEavisarPermissaoSegundoPlano() {
 
 function fecharAvisoPermissaoSegundoPlano() {
     document.getElementById('modal-permissao-segundo-plano')?.classList.add('hidden');
-    // Só marca como "já avisado" (pra não repetir de novo) quando a
-    // pessoa realmente abre as configurações (ver
-    // abrirConfiguracoesPermissaoSegundoPlano) - "Fazer isso depois" só
-    // fecha por agora, e o aviso volta a aparecer na próxima vez que o
-    // GPS conectar, até a pessoa realmente resolver.
+    // Não precisa guardar nenhuma flag de "já avisei" - da próxima vez
+    // que o app conectar o GPS, verificarEavisarPermissaoSegundoPlano
+    // confere a permissão de novo, e só mostra o aviso se ainda não
+    // tiver sido concedida de verdade.
 }
 
 // Leva a pessoa DIRETO pra tela de permissões do app - de lá, é só tocar
